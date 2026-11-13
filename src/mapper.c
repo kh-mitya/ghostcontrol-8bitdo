@@ -1,6 +1,5 @@
 /* SPDX-License-Identifier: GPL-3.0-or-later */
 #include "mapper.h"
-#include <dirent.h>
 #include <fcntl.h>
 #include <strings.h>
 #include <math.h>
@@ -8,6 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include <sys/stat.h>
 
 
 static const char *const in_names[GI_COUNT] = {
@@ -65,7 +65,7 @@ static int apply_combo(struct gc_combo *c, uint32_t *b, long now) {
 #define GUIDE_HOLD_MS    400
 #define GUIDE_TAP_FRAMES 4
 
-int mapper_preset_combo(struct gc_guide *g, uint32_t *b, long now) {
+int mapper_profile_combo(struct gc_guide *g, uint32_t *b, long now) {
     const uint32_t xbox = GI_BIT(GI_XBOX), lb = GI_BIT(GI_LB), rb = GI_BIT(GI_RB);
     uint32_t down = *b & ~g->prev;              /* pressed since last time */
     int dir = 0;
@@ -167,7 +167,6 @@ size_t mapper_format(const struct gc_profile *p, char *buf, size_t size) {
 #define PUT(...) do { int w = snprintf(buf + n, n < size ? size - n : 0, __VA_ARGS__); \
                       if (w > 0) n += (size_t)w; } while (0)
     PUT("# ghostcontrol-8bitdo mapping: Xbox input = DualSense button\n");
-    if (p->preset[0]) PUT("preset = %s\n", p->preset);
     for (int i = 0; i < GI_COUNT; i++)
         PUT("%s = %s\n", in_names[i], out_names[p->map[i] < GO_COUNT ? p->map[i] : 0]);
     for (int i = 0; i < OPT_COUNT; i++) {
@@ -176,17 +175,6 @@ size_t mapper_format(const struct gc_profile *p, char *buf, size_t size) {
     }
 #undef PUT
     return n < size ? n : (size ? size - 1 : 0);
-}
-
-/* Preset names become file names: letters (any script), digits, space, - _ */
-int mapper_valid_name(const char *name) {
-    size_t n = strlen(name);
-    if (!n || n > PRESET_NAME_MAX || name[0] == ' ' || name[n - 1] == ' ') return 0;
-    for (const unsigned char *c = (const unsigned char *)name; *c; c++)
-        if (!(*c >= 0x80 || (*c >= '0' && *c <= '9') || (*c >= 'a' && *c <= 'z') ||
-              (*c >= 'A' && *c <= 'Z') || *c == ' ' || *c == '-' || *c == '_'))
-            return 0;
-    return 1;
 }
 
 static int find(const char *const *names, int count, const char *s) {
@@ -221,10 +209,7 @@ int mapper_parse(const char *text, struct gc_profile *out) {
         *eq = '\0';
         char *key = trim(s), *val = trim(eq + 1);
         int i;
-        if (strcmp(key, "preset") == 0) {
-            if (*val && !mapper_valid_name(val)) return lineno;
-            snprintf(p.preset, sizeof(p.preset), "%s", val);
-        } else if ((i = find(in_names, GI_COUNT, key)) >= 0) {
+        if ((i = find(in_names, GI_COUNT, key)) >= 0) {
             int o = find(out_names, GO_COUNT, val);
             if (o < 0) return lineno;
             p.map[i] = (uint8_t)o;
@@ -264,45 +249,45 @@ int mapper_write_file(const char *path, const char *data, size_t len) {
     return 0;
 }
 
-int mapper_load_file(const char *path, struct gc_profile *p) {
-    char buf[4096];
+const char *const mapper_profile_list[PROFILES_MAX] = {
+    "Bolt", "Leaf", "Drop", "Heart", "Moon", "Sun",
+    "Diamond", "Flame", "Cloud", "Crown", "Bell", "Clover"
+};
+
+int mapper_profile_index(const char *name) {
+    for (int i = 0; i < PROFILES_MAX; i++)
+        if (strcmp(mapper_profile_list[i], name) == 0) return i;
+    return -1;
+}
+
+static void profile_path(const char *dir, const char *name, char *out, size_t size) {
+    snprintf(out, size, "%s/%s.ini", dir, name);
+}
+
+int mapper_profile_names(const char *dir, const char *names[PROFILES_MAX]) {
+    int n = 0;
+    for (int i = 0; i < PROFILES_MAX; i++) {
+        char path[160];
+        profile_path(dir, mapper_profile_list[i], path, sizeof(path));
+        if (access(path, F_OK) == 0) names[n++] = mapper_profile_list[i];
+    }
+    return n;
+}
+
+int mapper_profile_load(const char *dir, const char *name, struct gc_profile *p) {
+    if (strcmp(name, PROFILE_DEFAULT) == 0) { mapper_defaults(p); return 0; }
+    if (mapper_profile_index(name) < 0) return -1;
+    char path[160], buf[4096];
+    profile_path(dir, name, path, sizeof(path));
     if (mapper_read_file(path, buf, sizeof(buf)) < 0) return -1;
     return mapper_parse(buf, p) ? -1 : 0;
 }
 
-int mapper_save_file(const char *path, const struct gc_profile *p) {
-    char buf[4096];
+int mapper_profile_save(const char *dir, const char *name, const struct gc_profile *p) {
+    if (mapper_profile_index(name) < 0) return -1;
+    char path[160], buf[4096];
+    profile_path(dir, name, path, sizeof(path));
     size_t n = mapper_format(p, buf, sizeof(buf));
+    mkdir(dir, 0755);
     return mapper_write_file(path, buf, n);
-}
-
-static int by_name(const void *a, const void *b) { return strcmp(a, b); }
-
-int mapper_preset_names(const char *dir, char names[][PRESET_NAME_MAX + 1], int max) {
-    int n = 0;
-    DIR *d = opendir(dir);
-    struct dirent *e;
-    while (d && n < max && (e = readdir(d)) != NULL) {
-        size_t len = strlen(e->d_name);
-        if (len <= 4 || len - 4 > PRESET_NAME_MAX || strcmp(e->d_name + len - 4, ".ini") != 0) continue;
-        memcpy(names[n], e->d_name, len - 4);
-        names[n][len - 4] = '\0';
-        if (mapper_valid_name(names[n]) && strcasecmp(names[n], PRESET_DEFAULT) != 0) n++;
-    }
-    if (d) closedir(d);
-    qsort(names, (size_t)n, sizeof(names[0]), by_name);
-    return n;
-}
-
-int mapper_load_preset(const char *dir, const char *name, struct gc_profile *p) {
-    if (strcmp(name, PRESET_DEFAULT) == 0) {
-        mapper_defaults(p);
-    } else {
-        char path[192];
-        if (!mapper_valid_name(name)) return -1;
-        snprintf(path, sizeof(path), "%s/%s.ini", dir, name);
-        if (mapper_load_file(path, p) != 0) return -1;
-    }
-    snprintf(p->preset, sizeof(p->preset), "%s", name);
-    return 0;
 }

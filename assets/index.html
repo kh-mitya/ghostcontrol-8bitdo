@@ -3,211 +3,217 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>GhostControl — controller mapping</title>
+<title>GhostControl</title>
 <style>
-  :root {
-    --bg: #0b1220; --panel: #121c30; --panel2: #18253f; --line: #263656; --fg: #eef3fb; --dim: #93a4c3;
-    --acc: #4cc2ff; --acc-ink: #04121f; --ok: #3ddc97; --warn: #ffc24b; --bad: #ff6b6b;
-    --xa: #5fd068; --xb: #ff5f5f; --xx: #4aa3ff; --xy: #ffcc33;
-    --r: 14px; --tap: 52px;
-  }
-  * { box-sizing: border-box; }
-  html { font-size: 18px; }
-  body { margin: 0; background: radial-gradient(1200px 600px at 10% -10%, #18305a 0%, transparent 60%), var(--bg);
-         color: var(--fg); font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; line-height: 1.35;
-         min-height: 100vh; padding-bottom: 96px; }
-  button, select, input { font: inherit; color: inherit; }
-  button { cursor: pointer; }
-  button:disabled { opacity: .45; cursor: default; }
+:root {
+  --bg: #ffffff; --side: #f2f3f5; --card: #ffffff; --line: #d9dce1; --tx: #1b1d21; --mut: #6b7280;
+  --acc: #0070d1; --acc-soft: #e8f1fb; --chip: #eceef1; --warn-bg: #fff6e0; --warn: #8a5a00; --err: #c62f3f; --ok: #157a46;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; }
+body { font: 17px/1.4 "Noto Sans", "DejaVu Sans", system-ui, sans-serif; background: var(--bg); color: var(--tx); }
+button { font: inherit; color: inherit; cursor: pointer; }
+button:disabled { cursor: default; opacity: .45; }
+.mut { color: var(--mut); }
+h2 { font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--mut); font-weight: 700; margin: 22px 0 10px; }
+h2:first-child { margin-top: 0; }
 
-  /* top bar */
-  .top { display: flex; align-items: center; gap: 14px; padding: 16px 22px; border-bottom: 1px solid var(--line);
-         background: rgba(11, 18, 32, .92); position: sticky; top: 0; z-index: 5; }
-  .logo { width: 40px; height: 40px; border-radius: 10px; background: linear-gradient(135deg, #4cc2ff, #3ddc97);
-          display: grid; place-items: center; color: var(--acc-ink); font-weight: 800; font-size: 18px; }
-  .top h1 { font-size: 1.25rem; margin: 0; }
-  .top small { color: var(--dim); display: block; font-size: .8rem; }
-  .live { margin-left: auto; display: flex; align-items: center; gap: 8px; color: var(--dim); font-size: .9rem; }
-  .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--bad); box-shadow: 0 0 0 4px rgba(255,107,107,.15); }
-  .dot.on { background: var(--ok); box-shadow: 0 0 0 4px rgba(61,220,151,.15); }
+/* layout */
+.side { position: fixed; left: 0; top: 0; bottom: 0; width: 330px; background: var(--side); padding: 24px 22px; overflow-y: auto; }
+.main { margin-left: 330px; padding: 24px 30px 110px; }
+.bar { position: fixed; left: 330px; right: 0; bottom: 0; height: 76px; background: var(--card); border-top: 1px solid var(--line);
+  display: flex; align-items: center; gap: 10px; padding: 0 30px; }
+.bar .st { margin-right: auto; display: flex; align-items: center; gap: 8px; min-width: 0; }
+.bar .st span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st.ok { color: var(--ok); } .st.err { color: var(--err); } .st.warn { color: var(--warn); }
 
-  main { max-width: 1240px; margin: 0 auto; padding: 18px 22px; display: grid; gap: 18px;
-         grid-template-columns: minmax(0, 1fr) 380px; align-items: start; }
-  @media (max-width: 1000px) { main { grid-template-columns: 1fr; } }
-  @media (max-height: 760px) { .top { position: static; } }
-  .col { display: grid; gap: 18px; }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; }
-  .panel h2 { margin: 0 0 4px; font-size: 1.05rem; letter-spacing: .02em; }
-  .panel .sub { margin: 0 0 14px; color: var(--dim); font-size: .85rem; }
-  .full { grid-column: 1 / -1; }
+.brand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+.brand svg { width: 44px; height: 44px; flex: none; }
+.brand b { font-size: 21px; display: block; }
+.brand small { color: var(--mut); font-size: 12px; }
+.live { width: 9px; height: 9px; border-radius: 50%; background: #c5c9d0; display: inline-block; margin-right: 4px; }
+.live.on { background: #2fb36b; }
 
-  /* controllers */
-  .ctls { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 12px; }
-  .ctl { display: flex; gap: 12px; align-items: center; text-align: left; min-height: 76px; padding: 12px 14px;
-         background: var(--panel2); border: 2px solid var(--line); border-radius: 12px; }
-  .ctl:hover, .ctl:focus { border-color: #3b5a92; outline: none; }
-  .ctl.sel { border-color: var(--acc); background: #15304d; }
-  .ctl .num { width: 40px; height: 40px; flex: none; border-radius: 50%; display: grid; place-items: center;
-              background: #22355c; font-weight: 800; font-size: 1.1rem; }
-  .ctl.sel .num { background: var(--acc); color: var(--acc-ink); }
-  .ctl b { display: block; font-size: .98rem; }
-  .ctl span { color: var(--dim); font-size: .82rem; }
-  .empty { color: var(--dim); padding: 18px; text-align: center; border: 2px dashed var(--line); border-radius: 12px; }
-  .empty b { color: var(--fg); }
-  .banner { margin-top: 12px; padding: 12px 14px; border-radius: 10px; background: rgba(255,194,75,.12);
-            border: 1px solid rgba(255,194,75,.35); color: var(--warn); font-size: .9rem; }
-  .banner:empty { display: none; }
+/* controllers */
+.pad { display: flex; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 12px 14px; border-radius: 16px;
+  background: var(--card); border: 2px solid transparent; box-shadow: 0 1px 2px #0000000d; margin-bottom: 8px; }
+.pad.on { border-color: var(--acc); }
+.num { width: 30px; height: 30px; border-radius: 50%; background: var(--chip); display: flex; align-items: center; justify-content: center; font-weight: 800; flex: none; }
+.pad.on .num { background: var(--acc); color: #fff; }
+.pad small { display: flex; align-items: center; gap: 5px; color: var(--mut); font-size: 14px; }
+.pad small svg { width: 15px; height: 15px; }
+.empty { color: var(--mut); font-size: 14px; background: var(--card); border-radius: 14px; padding: 14px; }
+.seg { display: inline-flex; background: var(--chip); border-radius: 12px; padding: 3px; gap: 2px; }
+.seg button { border: 0; background: none; padding: 7px 14px; border-radius: 9px; color: var(--mut); font-size: 15px; }
+.seg button.on { background: var(--card); color: var(--tx); box-shadow: 0 1px 2px #00000014; font-weight: 600; }
+.labels { margin-top: 6px; display: flex; align-items: center; gap: 10px; font-size: 14px; }
 
-  /* mapping */
-  .groups { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 8px 22px; }
-  .group h3 { margin: 6px 0 8px; font-size: .78rem; text-transform: uppercase; letter-spacing: .12em; color: var(--dim); }
-  .map { display: flex; align-items: center; gap: 10px; padding: 5px 8px; margin-bottom: 6px;
-         border-radius: 10px; border: 2px solid transparent; transition: background .1s, border-color .1s; }
-  .map.hot { background: rgba(255,194,75,.14); border-color: var(--warn); }
-  .src { flex: none; min-width: 44px; height: 40px; padding: 0 12px; border-radius: 20px; display: grid; place-items: center;
-         background: #22355c; font-weight: 700; font-size: .85rem; white-space: nowrap; }
-  .src.round { width: 44px; height: 44px; padding: 0; border-radius: 50%; font-size: 1.05rem; color: #0b1220; }
-  .src.a { background: var(--xa); } .src.b { background: var(--xb); } .src.x { background: var(--xx); } .src.y { background: var(--xy); }
-  .map label { flex: 1; font-size: .85rem; color: var(--dim); }
-  select { width: 180px; min-height: 46px; padding: 0 12px; border-radius: 10px; background: #0d1729;
-           border: 2px solid var(--line); font-size: .95rem; }
-  select:focus, input:focus { outline: none; border-color: var(--acc); }
-  select.changed { border-color: var(--warn); }
+/* profiles */
+.pgrid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; }
+.pf { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 8px 0 6px; border-radius: 14px;
+  border: 2px solid transparent; background: none; font-size: 12px; color: var(--mut); }
+.pf .pi { width: 52px; height: 52px; border-radius: 14px; background: var(--card); box-shadow: 0 1px 2px #00000012;
+  display: flex; align-items: center; justify-content: center; }
+.pf .pi svg { width: 28px; height: 28px; }
+.pf.on { border-color: var(--acc); background: var(--card); color: var(--tx); }
+.pmenu { margin-top: 10px; background: var(--card); border-radius: 14px; padding: 12px; box-shadow: 0 1px 3px #00000014; }
+.pmenu .syms { display: grid; grid-template-columns: repeat(6, 1fr); gap: 4px; margin: 8px 0 10px; }
+.pmenu .syms button { height: 40px; border-radius: 10px; border: 1px solid var(--line); background: var(--card); display: flex; align-items: center; justify-content: center; }
+.pmenu .syms svg { width: 22px; height: 22px; }
+.hint { font-size: 13px; color: var(--mut); margin-top: 16px; line-height: 1.5; }
+.hint b { color: var(--tx); font-weight: 600; }
 
-  /* settings */
-  .setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 0;
-             border-top: 1px solid var(--line); }
-  .setting:first-child { border-top: 0; padding-top: 4px; }
-  .setting .t { font-size: .95rem; }
-  .setting .d { color: var(--dim); font-size: .8rem; }
-  .switch { appearance: none; -webkit-appearance: none; flex: none; width: 64px; height: 36px; border-radius: 18px;
-            background: #2a3a5c; position: relative; border: 0; margin: 0; cursor: pointer; transition: background .15s; }
-  .switch::after { content: ""; position: absolute; top: 4px; left: 4px; width: 28px; height: 28px; border-radius: 50%;
-                   background: #cfd9ea; transition: left .15s; }
-  .switch:checked { background: var(--acc); }
-  .switch:checked::after { left: 32px; background: #fff; }
-  .step { display: flex; align-items: center; gap: 6px; flex: none; }
-  .step button { width: 48px; height: 46px; border-radius: 10px; border: 2px solid var(--line); background: var(--panel2);
-                 font-size: 1.4rem; line-height: 1; }
-  .step output { min-width: 58px; text-align: center; font-weight: 700; font-size: 1.05rem; }
+/* main */
+.head { display: flex; align-items: center; gap: 14px; margin-bottom: 16px; }
+.head h1 { font-size: 26px; }
+.head .seg { margin-left: auto; }
+.banner { background: var(--warn-bg); color: var(--warn); border-radius: 12px; padding: 10px 14px; font-size: 14px; margin-bottom: 12px; }
+.grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2px 26px; }
+.row { display: grid; grid-template-columns: 36px 1fr minmax(170px, 210px); align-items: center; gap: 10px; padding: 3px 10px; border-radius: 14px; }
+.row.hot { background: var(--acc-soft); }
+.row .nm { font-weight: 500; }
+.gl { width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; }
+.gl svg { width: 26px; height: 26px; }
+.gl.t { font-size: 12px; font-weight: 700; background: var(--chip); border-radius: 7px; height: 26px; width: auto; min-width: 32px; padding: 0 5px; }
+.pick { display: flex; align-items: center; gap: 6px; height: 44px; padding: 0 10px; border-radius: 12px; background: var(--card);
+  border: 1.5px solid var(--line); text-align: left; overflow: hidden; }
+.pick.chg { border: 2px solid var(--acc); }
+.pick .car { margin-left: auto; color: var(--mut); font-size: 13px; }
+.chip { display: inline-flex; align-items: center; justify-content: center; height: 26px; min-width: 26px; padding: 0 7px; border-radius: 7px;
+  background: var(--chip); font-weight: 700; font-size: 13px; white-space: nowrap; }
+.chip.round { border-radius: 50%; padding: 0; width: 26px; color: #fff; }
+.chip.fixed { background: none; border: 1px dashed var(--line); color: var(--mut); font-weight: 600; }
+.none { color: var(--mut); font-size: 14px; }
+.unused { margin-top: 12px; padding: 8px 12px; border-radius: 12px; border: 1px dashed var(--line); display: flex; flex-wrap: wrap; gap: 8px; align-items: center; color: var(--mut); font-size: 14px; }
 
-  /* presets */
-  .presets { display: grid; gap: 8px; max-height: 320px; overflow: auto; margin-bottom: 12px; }
-  .preset { display: flex; align-items: center; gap: 8px; min-height: var(--tap); padding: 6px 8px 6px 14px;
-            background: var(--panel2); border: 2px solid var(--line); border-radius: 12px; }
-  .preset.cur { border-color: var(--ok); }
-  .preset .n { flex: 1; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .tag { color: var(--ok); font-size: .72rem; text-transform: uppercase; letter-spacing: .08em; font-weight: 700; }
-  .tag.dim { color: var(--dim); }
-  .btn { min-height: 46px; padding: 0 18px; border-radius: 10px; border: 2px solid var(--line); background: #1d2c4b;
-         font-weight: 600; font-size: .95rem; }
-  .btn:hover:not(:disabled), .btn:focus { border-color: #3b5a92; outline: none; }
-  .btn.primary { background: var(--acc); border-color: var(--acc); color: var(--acc-ink); }
-  .btn.danger { color: var(--bad); }
-  .btn.armed { background: var(--bad); border-color: var(--bad); color: #fff; }
-  .btn.small { min-height: 40px; padding: 0 12px; font-size: .85rem; }
-  .saveas { display: flex; gap: 8px; }
-  .saveas input { flex: 1; min-width: 0; min-height: 50px; padding: 0 14px; border-radius: 10px; background: #0d1729;
-                  border: 2px solid var(--line); font-size: 1rem; }
+/* picker */
+.veil { position: fixed; inset: 0; background: #1b1d2133; display: flex; align-items: center; justify-content: center; z-index: 5; }
+.dlg { background: var(--card); border-radius: 20px; padding: 22px; width: min(640px, 94vw); max-height: 90vh; overflow-y: auto; box-shadow: 0 10px 40px #0003; }
+.dlg h3 { display: flex; align-items: center; gap: 10px; font-size: 21px; margin-bottom: 4px; }
+.dlg p { color: var(--mut); font-size: 14px; margin-bottom: 14px; }
+.opts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.opt { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 12px; border: 1.5px solid var(--line); background: var(--card); text-align: left; min-height: 52px; }
+.opt.on { border: 2px solid var(--acc); background: var(--acc-soft); }
+.opt small { display: block; color: var(--mut); font-size: 12px; }
+.dlg .end { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
 
-  /* help */
-  .keys { display: grid; gap: 12px; }
-  .key { display: grid; grid-template-columns: 178px 1fr; gap: 12px; align-items: start; }
-  .combo { display: flex; gap: 4px; flex-wrap: wrap; }
-  kbd { display: inline-block; min-width: 30px; padding: 4px 8px; border-radius: 8px; background: #22355c;
-        border-bottom: 3px solid #121f38; font: 700 .78rem system-ui, sans-serif; text-align: center; }
-  .key .w { font-size: .88rem; }
-  .key .w small { display: block; color: var(--dim); font-size: .78rem; }
-  .key.caution .w { color: var(--warn); }
+/* settings tab */
+.set { display: flex; align-items: center; gap: 16px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); margin-bottom: 8px; max-width: 760px; }
+.set .t { font-weight: 600; } .set .d { color: var(--mut); font-size: 14px; }
+.set > div:first-child { flex: 1; }
+.tog { width: 56px; height: 32px; border-radius: 16px; border: 0; background: #c9ced6; position: relative; flex: none; }
+.tog::after { content: ""; position: absolute; left: 4px; top: 4px; width: 24px; height: 24px; border-radius: 50%; background: #fff; transition: left .15s; }
+.tog.on { background: var(--acc); } .tog.on::after { left: 28px; }
+.step { display: flex; align-items: center; gap: 8px; }
+.step button { width: 44px; height: 44px; border-radius: 22px; border: 1.5px solid var(--line); background: var(--card); font-size: 22px; }
+.step output { min-width: 52px; text-align: center; font-weight: 700; }
+.help { max-width: 760px; }
+.help li { list-style: none; display: flex; gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.help li b { min-width: 230px; }
+.help li.caution b { color: var(--warn); }
 
-  /* bottom bar */
-  .bar { position: fixed; left: 0; right: 0; bottom: 0; z-index: 6; display: flex; align-items: center; gap: 12px;
-         padding: 14px 22px; background: rgba(13, 21, 38, .97); border-top: 1px solid var(--line); }
-  .bar .status { flex: 1; color: var(--dim); font-size: .92rem; }
-  .bar .status b { color: var(--fg); }
-  .bar .status.warn b { color: var(--warn); }
-  .bar .status.ok b { color: var(--ok); }
-  .bar .status.err b { color: var(--bad); }
-  .hidden { display: none !important; }
+.btn { height: 46px; padding: 0 22px; border-radius: 23px; border: 1.5px solid var(--line); background: var(--card); font-size: 16px; font-weight: 600; white-space: nowrap; }
+.btn.pri { background: var(--acc); border-color: var(--acc); color: #fff; }
+.btn.danger { color: var(--err); }
+.hidden { display: none !important; }
+
+@media (max-width: 1100px) {
+  .side { width: 270px; padding: 18px 14px; } .main { margin-left: 270px; } .bar { left: 270px; }
+  .grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 760px) {
+  .side { position: static; width: auto; } .main { margin-left: 0; } .bar { left: 0; }
+}
 </style>
 </head>
 <body>
-<div class="top">
-  <div class="logo">GC</div>
-  <div><h1>Controller mapping</h1><small id="ver">ghostcontrol-8bitdo</small></div>
-  <div class="live"><span class="dot" id="dot"></span><span id="livetxt">Connecting…</span></div>
-</div>
+<aside class="side">
+  <div class="brand">
+    <svg viewBox="0 0 512 512"><rect width="512" height="512" rx="96" fill="#0070d1"/><path fill="#fff" d="M256 100c-80 0-132 58-132 136v172c0 10 10 14 18 8 14-12 32-12 46 0s32 12 46 0 32-12 44 0 32 12 46 0 32-12 46 0c8 6 18 2 18-8V236c0-78-52-136-132-136z"/><g fill="#0070d1"><rect x="172" y="232" width="56" height="18" rx="5"/><rect x="191" y="213" width="18" height="56" rx="5"/><circle cx="314" cy="222" r="11"/><circle cx="338" cy="244" r="11"/><circle cx="290" cy="244" r="11"/><circle cx="314" cy="266" r="11"/></g></svg>
+    <div><b>GhostControl</b><small><span class="live" id="live"></span><span id="ver">connecting…</span></small></div>
+  </div>
+  <h2>Controllers</h2>
+  <div id="pads"></div>
+  <div id="labelsBox" class="labels hidden"><span class="mut">Labels</span><div class="seg"><button id="lbX">Xbox</button><button id="lbN">Nintendo</button></div></div>
+  <h2>Profiles</h2>
+  <div class="pgrid" id="profiles"></div>
+  <div class="pmenu hidden" id="pmenu"></div>
+  <div class="hint"><b>Xbox + RB / LB</b> on the controller: next / previous profile.</div>
+</aside>
 
-<main>
-  <section class="panel full">
-    <h2>Controllers</h2>
-    <p class="sub">Pick the controller to set up. Each one keeps its own mapping and gets it back when it reconnects.</p>
-    <div class="ctls" id="ctls"></div>
-    <div class="banner" id="banner"></div>
+<main class="main">
+  <div class="head"><h1 id="title">Buttons</h1>
+    <div class="seg"><button id="tabB" class="on">Buttons</button><button id="tabS">Sticks &amp; triggers</button><button id="tabH">Help</button></div></div>
+  <div id="banner" class="banner hidden">This controller uses the Switch protocol (8BitDo adapter or Switch Pro): LT and RT are on / off only, without analog travel.</div>
+  <section id="pageB"><div class="grid" id="rows"></div><div class="unused hidden" id="unused"></div></section>
+  <section id="pageS" class="hidden"><div id="settings"></div></section>
+  <section id="pageH" class="hidden help">
+    <h2>Shortcuts on the controller</h2>
+    <ul>
+      <li><b>Xbox + RB / Xbox + LB</b><span>Next / previous profile. A notification shows its name.</span></li>
+      <li><b>Xbox alone</b><span>PS button (tap or hold).</span></li>
+      <li><b>View + Menu together</b><span>Touchpad click (can be turned off in Sticks &amp; triggers).</span></li>
+    </ul>
+    <h2>8BitDo adapter (hold 3 seconds)</h2>
+    <ul>
+      <li><b>View + LB</b><span>Switch mode, the one this payload uses.</span></li>
+      <li><b>LB + RB + L3 + R3</b><span>8BitDo Ultimate Software profile on / off.</span></li>
+      <li class="caution"><b>View + ↑ / ← / → / ↓</b><span>Other adapter modes (XInput, DInput, Mac, PS Classic). The controller stops working here until you switch back with View + LB.</span></li>
+    </ul>
+    <h2>How it works</h2>
+    <ul>
+      <li><b>Profiles</b><span>Shared by all controllers; every controller remembers its own. Buttons are kept by position, so a profile works the same on Xbox and Switch layouts.</span></li>
+      <li><b>Default</b><span>Built in and cannot be changed. Save your changes as a new profile.</span></li>
+    </ul>
   </section>
-
-  <div class="col" id="left">
-    <section class="panel">
-      <h2>Buttons</h2>
-      <p class="sub">Press a button on the controller to find it here, then choose what it does on the PlayStation side.</p>
-      <div class="groups" id="groups"></div>
-    </section>
-  </div>
-
-  <div class="col" id="right">
-    <section class="panel">
-      <h2>Presets</h2>
-      <p class="sub">Saved mappings. Loading one changes only the selected controller.</p>
-      <div class="presets" id="presets"></div>
-      <div class="saveas">
-        <input id="name" maxlength="40" placeholder="Name for a new preset">
-        <button class="btn" onclick="savePreset()">Save</button>
-      </div>
-    </section>
-
-    <section class="panel" id="optsPanel">
-      <h2>Sticks and triggers</h2>
-      <div id="opts"></div>
-    </section>
-
-    <section class="panel">
-      <h2>Controller shortcuts</h2>
-      <div class="keys">
-        <div class="key"><div class="combo"><kbd>Xbox</kbd><kbd>RB</kbd></div>
-          <div class="w">Next preset<small>Xbox + LB goes back. A notification shows the preset name.</small></div></div>
-        <div class="key"><div class="combo"><kbd>View</kbd><kbd>Menu</kbd></div>
-          <div class="w">Touchpad click<small>Press both together. Can be turned off above.</small></div></div>
-        <div class="key"><div class="combo"><kbd>View</kbd><kbd>LB</kbd><kbd>3 s</kbd></div>
-          <div class="w">8BitDo adapter: Switch mode<small>The mode this payload needs. The LED blinks twice.</small></div></div>
-        <div class="key caution"><div class="combo"><kbd>View</kbd><kbd>↑ ← → ↓</kbd><kbd>3 s</kbd></div>
-          <div class="w">Other adapter modes<small>XInput, DInput, Mac, PSC are not supported here. Avoid holding these.</small></div></div>
-        <div class="key"><div class="combo"><kbd>LB</kbd><kbd>RB</kbd><kbd>L3</kbd><kbd>R3</kbd></div>
-          <div class="w">8BitDo profile on / off<small>Remapping in the adapter works too; just keep its stick inversion off.</small></div></div>
-      </div>
-    </section>
-  </div>
 </main>
 
 <div class="bar hidden" id="bar">
-  <div class="status" id="status">Select a controller</div>
-  <button class="btn" id="revert" onclick="revert()">Undo changes</button>
-  <button class="btn" onclick="loadDefault()">Reset to default</button>
-  <button class="btn primary" onclick="apply()">Apply</button>
+  <div class="st" id="st"></div>
+  <button class="btn" id="undo">Undo</button>
+  <button class="btn" id="saveNew">Save as new profile</button>
+  <button class="btn pri" id="apply">Apply</button>
 </div>
 
 <script>
-var GROUPS = [
-  ["Face buttons", [["a", "A", "round a"], ["b", "B", "round b"], ["x", "X", "round x"], ["y", "Y", "round y"]]],
-  ["Shoulders and triggers", [["lb", "LB"], ["rb", "RB"], ["lt", "LT"], ["rt", "RT"]]],
-  ["System buttons", [["view", "View"], ["menu", "Menu"], ["xbox", "Xbox"], ["share", "Share", "", "Share / Capture"]]],
-  ["Stick clicks", [["ls", "LS", "", "Left stick press"], ["rs", "RS", "", "Right stick press"]]],
-  ["D-pad", [["up", "↑"], ["down", "↓"], ["left", "←"], ["right", "→"]]]
-];
+/* inputs, in the order of the payload's button bits */
 var IN = ["a", "b", "x", "y", "lb", "rb", "lt", "rt", "ls", "rs", "view", "menu", "xbox", "share", "up", "down", "left", "right"];
-var OUT = [["none", "— Nothing —"], ["cross", "✕  Cross"], ["circle", "○  Circle"], ["square", "□  Square"],
-  ["triangle", "△  Triangle"], ["l1", "L1"], ["r1", "R1"], ["l2", "L2"], ["r2", "R2"], ["l3", "L3"], ["r3", "R3"],
-  ["create", "Create"], ["options", "Options"], ["ps", "PS button"], ["touchpad", "Touchpad click"],
-  ["up", "D-pad ↑"], ["down", "D-pad ↓"], ["left", "D-pad ←"], ["right", "D-pad →"]];
+var XBOX = { a: "A", b: "B", x: "X", y: "Y", lb: "LB", rb: "RB", lt: "LT", rt: "RT", ls: "LS", rs: "RS", view: "View", menu: "Menu",
+  xbox: "Xbox", share: "Share", up: "↑", down: "↓", left: "←", right: "→" };
+var NINTENDO = { a: "B", b: "A", x: "Y", y: "X", lb: "L", rb: "R", lt: "ZL", rt: "ZR", ls: "LS", rs: "RS", view: "−", menu: "+",
+  xbox: "Home", share: "Capture", up: "↑", down: "↓", left: "←", right: "→" };
+var XCOL = { a: "#5bc46a", b: "#e45a5a", x: "#4c8fe6", y: "#e8b931" };
+var SW = function (d) { return '<svg viewBox="0 0 24 24">' + d + "</svg>"; };
+var LINE = 'fill="none" stroke="#5d6573" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+/* DualSense outputs: [key, name, glyph] */
+var OUT = [
+  ["triangle", "Triangle", SW('<path d="M12 4L21 19H3Z" fill="none" stroke="#14a383" stroke-width="2.4" stroke-linejoin="round"/>')],
+  ["circle", "Circle", SW('<circle cx="12" cy="12" r="8" fill="none" stroke="#e2475a" stroke-width="2.4"/>')],
+  ["cross", "Cross", SW('<path d="M5 5L19 19M19 5L5 19" stroke="#3f6fe0" stroke-width="2.6" stroke-linecap="round"/>')],
+  ["square", "Square", SW('<rect x="5" y="5" width="14" height="14" rx="1.5" fill="none" stroke="#cf55aa" stroke-width="2.4"/>')],
+  ["l1", "L1", "L1"], ["r1", "R1", "R1"], ["l2", "L2", "L2"], ["r2", "R2", "R2"], ["l3", "L3", "L3"], ["r3", "R3", "R3"],
+  ["up", "Up", SW('<path d="M12 5l7 9H5z" fill="#5d6573"/>')], ["create", "Create", SW('<path d="M9 4v6M12 4v6M15 4v6M6 14h12" ' + LINE + "/>")],
+  ["down", "Down", SW('<path d="M12 19l7-9H5z" fill="#5d6573"/>')], ["options", "Options", SW('<path d="M6 8h12M6 12h12M6 16h12" ' + LINE + "/>")],
+  ["left", "Left", SW('<path d="M5 12l9-7v14z" fill="#5d6573"/>')], ["touchpad", "Touchpad", SW('<rect x="3" y="6" width="18" height="12" rx="3" ' + LINE + "/>")],
+  ["right", "Right", SW('<path d="M19 12l-9-7v14z" fill="#5d6573"/>')],
+  ["ps", "PS button", SW('<circle cx="12" cy="12" r="9" ' + LINE + '/><text x="12" y="15.5" font-size="8.5" font-weight="800" text-anchor="middle" fill="#5d6573" font-family="sans-serif">PS</text>')]
+];
+var SYM = {   /* profile symbols: [colour, path] */
+  Default: ["#9aa1ab", '<path d="M12 2.5l2.9 6 6.6.8-4.9 4.6 1.3 6.6L12 17.3l-5.9 3.2 1.3-6.6L2.5 9.3l6.6-.8z"/>'],
+  Bolt: ["#e0a400", '<path d="M13.5 2L4.5 13.5h6L9.5 22l10-12.5h-6z"/>'],
+  Leaf: ["#2fa36b", '<path d="M20 4C9 4 4 9 4 16c0 1.5.3 2.8.8 4 1-4 4-7.5 8.2-9.5-3.4 2.6-5.6 5.6-6.6 9.3C15.5 20 20 14 20 4z"/>'],
+  Drop: ["#1f7ae0", '<path d="M12 2.5C9 7 5.5 10.5 5.5 14.5a6.5 6.5 0 0 0 13 0C18.5 10.5 15 7 12 2.5z"/>'],
+  Heart: ["#e5485a", '<path d="M12 20.5S3 15 3 8.8A4.6 4.6 0 0 1 12 6.6a4.6 4.6 0 0 1 9 2.2C21 15 12 20.5 12 20.5z"/>'],
+  Moon: ["#7a5cd6", '<path d="M15.5 3.2A9 9 0 1 0 20.8 15 7.2 7.2 0 0 1 15.5 3.2z"/>'],
+  Sun: ["#f08a00", '<circle cx="12" cy="12" r="4.5"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M4.9 19.1l1.8-1.8M17.3 6.7l1.8-1.8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>'],
+  Diamond: ["#12a5b8", '<path d="M12 2.5l8.5 9.5-8.5 9.5L3.5 12z"/>'],
+  Flame: ["#f05a28", '<path d="M12 2c1 4 5 6 5 11a5 5 0 0 1-10 0c0-2.5 1.2-4 2.5-5.5.2 2 1 3 2.2 3.5C11 8 11 5 12 2z"/>'],
+  Cloud: ["#5a8fd8", '<path d="M7 19a4.5 4.5 0 0 1-.6-9A6 6 0 0 1 18 9.5a4.8 4.8 0 0 1-.5 9.5z"/>'],
+  Crown: ["#c99700", '<path d="M3 8l4.5 4L12 5l4.5 7L21 8l-2 11H5z"/>'],
+  Bell: ["#d06b1f", '<path d="M12 3a6 6 0 0 0-6 6v4l-2 3h16l-2-3V9a6 6 0 0 0-6-6zM9.5 18a2.5 2.5 0 0 0 5 0z"/>'],
+  Clover: ["#3a9a3a", '<circle cx="12" cy="7.5" r="3.6"/><circle cx="7.5" cy="12" r="3.6"/><circle cx="16.5" cy="12" r="3.6"/><circle cx="12" cy="16.5" r="3.6"/><path d="M12 12l3 9" stroke="currentColor" stroke-width="2"/>']
+};
+var ALL = ["Bolt", "Leaf", "Drop", "Heart", "Moon", "Sun", "Diamond", "Flame", "Cloud", "Crown", "Bell", "Clover"];
 var SWITCHES = [["touch_combo", "View + Menu = touchpad", "Press both together for a touchpad click"],
   ["swap_sticks", "Swap sticks", "The left stick works as the right one and back"],
   ["invert_left_x", "Invert left stick X", ""], ["invert_left_y", "Invert left stick Y", ""],
@@ -215,14 +221,15 @@ var SWITCHES = [["touch_combo", "View + Menu = touchpad", "Press both together f
 var STEPS = [["deadzone_left", "Left stick dead zone", "Ignore small movements around the centre", 0, 50],
   ["deadzone_right", "Right stick dead zone", "", 0, 50],
   ["trigger_threshold", "LT / RT press point", "How far a trigger goes before L2 / R2 counts as pressed", 1, 99]];
-var DEFAULT = "Default", m = {}, saved = {}, ctl = null, ctls = [], presets = [], armed = null, leaveAsked = 0;
+var DEFAULT = "Default";
+var m = {}, saved = {}, ctl = null, ctls = [], profiles = [DEFAULT], loaded = null, menuOpen = false, armed = 0, leaveAsked = 0;
 
 function $(id) { return document.getElementById(id); }
 function el(tag, cls, html) { var e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; }
-function esc(t) { return String(t).replace(/[&<>"]/g, function (c) { return "&#" + c.charCodeAt(0) + ";"; }); }
-function q() { return "?slot=" + ctl.slot + "&id=" + ctl.id; }
+function sym(name, size) { var s = SYM[name] || SYM.Default;
+  return '<svg viewBox="0 0 24 24" fill="currentColor" style="color:' + s[0] + (size ? ";width:" + size + "px;height:" + size + "px" : "") + '">' + s[1] + "</svg>"; }
 function post(url, body) {
-  return fetch(url, { method: "POST", body: body }).then(function (r) {
+  return fetch(url, { method: "POST", body: body || "" }).then(function (r) {
     return r.text().then(function (t) { if (!r.ok) throw new Error(t); return t; });
   });
 }
@@ -235,217 +242,253 @@ function parse(text) {
   });
   return p;
 }
-function format(p, preset) {
-  var t = "# ghostcontrol-8bitdo mapping\n" + (preset ? "preset = " + preset + "\n" : "");
-  for (var k in p) if (k != "preset") t += k + " = " + p[k] + "\n";
-  return t;
-}
-function same(a, b) { for (var k in a) if (k != "preset" && a[k] != b[k]) return false; return true; }
-function dirty() { return !!ctl && !same(m, saved); }
+function format(p) { var t = "# ghostcontrol-8bitdo profile\n"; for (var k in p) t += k + " = " + p[k] + "\n"; return t; }
+function changes() { var n = 0; for (var k in saved) if (m[k] != saved[k]) n++; return n; }
 function sameCtl(a, b) { return a && b && a.id == b.id && a.slot == b.slot; }
+function q() { return "slot=" + ctl.slot + "&id=" + ctl.id; }
+function label(k) { return (ctl && ctl.switch && ctl.nintendo ? NINTENDO : XBOX)[k]; }
+function chip(k) {
+  var nin = ctl && ctl.switch && ctl.nintendo, c = !nin && XCOL[k];
+  return '<span class="chip' + (c ? ' round" style="background:' + c : "") + '">' + label(k) + "</span>";
+}
+function glyph(o) { return o[2].charAt(0) == "<" ? '<span class="gl">' + o[2] + "</span>" : '<span class="gl t">' + o[2] + "</span>"; }
 
 /* ── status bar ── */
-function status(text, kind) { var s = $("status"); s.className = "status " + (kind || ""); s.innerHTML = text; }
+function status(text, kind) {
+  var st = $("st"); st.className = "st " + (kind || "");
+  st.innerHTML = (ctl ? sym(ctl.profile, 20) : "") + "<span>" + text + "</span>";
+}
 function refreshBar() {
   $("bar").classList.toggle("hidden", !ctl);
-  $("revert").disabled = !dirty();
-  if (dirty()) status("<b>Changes not applied.</b> Press Apply to use them on controller " + ctl.slot + ".", "warn");
+  if (!ctl) return;
+  var n = changes(), def = ctl.profile == DEFAULT;
+  $("undo").disabled = !n;
+  $("apply").classList.toggle("hidden", def);
+  $("apply").textContent = "Apply to " + ctl.profile;
+  $("apply").disabled = !n;
+  $("saveNew").classList.toggle("pri", def);
+  if (!refreshBar.hold) status(ctl.profile + (n ? " · " + n + (n == 1 ? " change" : " changes") +
+    (def ? " · Default cannot change, save as new" : "") : ""), n ? "warn" : "");
+}
+function say(text, kind) {
+  refreshBar.hold = 0; status(text, kind); refreshBar.hold = 1;
+  clearTimeout(say.t); say.t = setTimeout(function () { refreshBar.hold = 0; refreshBar(); }, 3500);
 }
 
 /* ── controllers ── */
-function ctlName(c) { return c.analog ? "Xbox controller (wired)" : "8BitDo adapter / Switch Pro"; }
-function renderCtls() {
-  var box = $("ctls"); box.innerHTML = "";
+function ctlName(c) { return c.switch ? "8BitDo / Switch Pro" : "Xbox · wired"; }
+function renderPads() {
+  var box = $("pads"); box.innerHTML = "";
   if (!ctls.length) {
-    box.appendChild(el("div", "empty", "No controller connected. Plug one in, or switch the 8BitDo adapter to Switch mode " +
-      "(<b>View + LB</b> for 3 seconds), then press any button on the controller."));
-    return;
+    box.appendChild(el("div", "empty", "No controller yet. Plug one in, or switch the 8BitDo adapter to Switch mode " +
+      "(<b>View + LB</b> for 3 seconds), then press any button."));
   }
   ctls.forEach(function (c) {
-    var b = el("button", "ctl" + (sameCtl(c, ctl) ? " sel" : ""));
-    b.innerHTML = '<div class="num">' + c.slot + '</div><div><b>' + ctlName(c) + '</b><span>Preset: ' +
-      esc(c.preset || "custom") + (c.pad ? "" : " · press a button to start") + '</span></div>';
+    var b = el("button", "pad" + (sameCtl(c, ctl) ? " on" : ""));
+    b.innerHTML = '<span class="num">' + c.slot + "</span><div>" + ctlName(c) + "<small>" + sym(c.profile) + c.profile +
+      (c.pad ? "" : " · press a button to start") + "</small></div>";
     b.onclick = function () { choose(c); };
     box.appendChild(b);
   });
+  $("labelsBox").classList.toggle("hidden", !(ctl && ctl.switch));
+  if (ctl) { $("lbX").className = ctl.nintendo ? "" : "on"; $("lbN").className = ctl.nintendo ? "on" : ""; }
+}
+function guard() {            /* unapplied changes: a second click within 4 s discards them */
+  if (!changes() || Date.now() - leaveAsked < 4000) return true;
+  leaveAsked = Date.now();
+  say("Changes not applied. Click again to discard them, or Apply / Save first.", "warn");
+  return false;
 }
 function choose(c) {
-  if (sameCtl(c, ctl)) return;
-  if (dirty() && Date.now() - leaveAsked > 4000) {        /* a second click within 4 s discards */
-    leaveAsked = Date.now();
-    status("<b>Changes not applied.</b> Click that controller again to discard them, or press Apply first.", "warn");
-    return;
-  }
-  ctl = c; renderCtls(); loadMapping();
+  if (sameCtl(c, ctl) || !guard()) return;
+  ctl = c; menuOpen = false; renderPads(); renderProfiles(); load();
+}
+function setLabels(nin) {
+  if (!ctl) return;
+  post("/controller?" + q() + "&labels=" + (nin ? "nintendo" : "xbox")).then(function () {
+    ctl.nintendo = nin ? 1 : 0; renderPads(); renderRows();
+  }).catch(gone);
+}
+
+/* ── profiles ── */
+function renderProfiles() {
+  var box = $("profiles"); box.innerHTML = "";
+  profiles.forEach(function (n) {
+    var b = el("button", "pf" + (ctl && ctl.profile == n ? " on" : ""), '<span class="pi">' + sym(n) + "</span>" + n);
+    b.disabled = !ctl;
+    b.onclick = function () { pickProfile(n); };
+    box.appendChild(b);
+  });
+  renderMenu();
+}
+function pickProfile(n) {
+  if (!ctl) return;
+  if (ctl.profile == n) { menuOpen = !menuOpen && n != DEFAULT; armed = 0; renderMenu(); return; }
+  if (!guard()) return;
+  post("/controller?" + q() + "&profile=" + n).then(function () {
+    ctl.profile = n; menuOpen = false; renderPads(); renderProfiles(); load();
+    say("Controller " + ctl.slot + " uses " + n + " now.", "ok");
+  }).catch(gone);
+}
+function renderMenu() {
+  var box = $("pmenu");
+  box.classList.toggle("hidden", !(menuOpen && ctl && ctl.profile != DEFAULT));
+  if (box.classList.contains("hidden")) return;
+  var name = ctl.profile;
+  box.innerHTML = "<b>" + name + '</b> <span class="mut" style="font-size:14px">· change the symbol</span>';
+  var syms = el("div", "syms");
+  ALL.forEach(function (s) {
+    if (profiles.indexOf(s) >= 0) return;
+    var b = el("button", "", sym(s)); b.title = s;
+    b.onclick = function () { rename(name, s); };
+    syms.appendChild(b);
+  });
+  box.appendChild(syms);
+  var del = el("button", "btn danger", armed ? "Sure? Delete " + name : "Delete profile");
+  del.onclick = function () {
+    if (!armed) { armed = 1; renderMenu(); setTimeout(function () { armed = 0; renderMenu(); }, 4000); return; }
+    post("/profile/delete?name=" + name).then(function () {
+      menuOpen = false; armed = 0; say(name + " deleted. Its controllers use Default now.", "ok"); reloadNow();
+    }).catch(function (e) { say("Not deleted: " + e.message, "err"); });
+  };
+  box.appendChild(del);
+}
+function rename(from, to) {
+  post("/profile/rename?name=" + from + "&to=" + to).then(function () {
+    menuOpen = false; loaded = to;
+    ctls.forEach(function (c) { if (c.profile == from) c.profile = to; });
+    say(from + " is " + to + " now.", "ok"); reloadNow();
+  }).catch(function (e) { say("Not changed: " + e.message, "err"); });
 }
 
 /* ── mapping editor ── */
-function renderMapping() {
-  var g = $("groups"); g.innerHTML = "";
-  GROUPS.forEach(function (grp) {
-    var box = el("div", "group"); box.appendChild(el("h3", "", grp[0]));
-    grp[1].forEach(function (it) {
-      var row = el("div", "map"); row.id = "row_" + it[0];
-      row.appendChild(el("div", "src " + (it[2] || ""), it[1]));
-      row.appendChild(el("label", "", it[3] || ""));
-      var sel = el("select");
-      OUT.forEach(function (o) { var op = el("option", "", o[1]); op.value = o[0]; sel.appendChild(op); });
-      sel.value = m[it[0]] || "none";
-      var mark = function () { sel.className = m[it[0]] != saved[it[0]] ? "changed" : ""; };
-      mark();
-      sel.onchange = function () { m[it[0]] = sel.value; mark(); refreshBar(); renderPresets(); };
-      row.appendChild(sel); box.appendChild(row);
-    });
-    g.appendChild(box);
+function sources(out) { return IN.filter(function (k) { return m[k] == out; }); }
+function renderRows() {
+  var box = $("rows"); box.innerHTML = "";
+  OUT.forEach(function (o) {
+    var row = el("div", "row"); row.id = "row_" + o[0];
+    row.innerHTML = glyph(o) + '<span class="nm">' + o[1] + "</span>";
+    var src = sources(o[0]), b = el("button", "pick");
+    var was = IN.filter(function (k) { return saved[k] == o[0]; }).join();
+    if (src.join() != was) b.classList.add("chg");
+    b.innerHTML = (src.length ? src.map(chip).join("") : '<span class="none">nothing</span>') +
+      (o[0] == "touchpad" && m.touch_combo == "1" ? '<span class="chip fixed">' + label("view") + "+" + label("menu") + "</span>" : "") +
+      '<span class="car">▾</span>';
+    b.onclick = function () { openPicker(o); };
+    row.appendChild(b); box.appendChild(row);
   });
-  var o = $("opts"); o.innerHTML = "";
+  var free = IN.filter(function (k) { return !m[k] || m[k] == "none"; });
+  $("unused").classList.toggle("hidden", !free.length);
+  $("unused").innerHTML = "Not used: " + free.map(chip).join("");
+}
+function outName(k) { for (var i = 0; i < OUT.length; i++) if (OUT[i][0] == k) return OUT[i][1]; return ""; }
+function openPicker(o) {
+  var veil = el("div", "veil"), dlg = el("div", "dlg");
+  dlg.innerHTML = "<h3>" + glyph(o) + o[1] + "</h3><p>Pick the buttons of your controller that press " + o[1] +
+    ". A button does one thing, so picking it here takes it from where it was.</p>";
+  var grid = el("div", "opts");
+  var draw = function () {
+    grid.innerHTML = "";
+    IN.forEach(function (k) {
+      var on = m[k] == o[0], cur = on ? "" : m[k] && m[k] != "none" ? "now " + outName(m[k]) : "not used";
+      var b = el("button", "opt" + (on ? " on" : ""), chip(k) + "<div>" + label(k) + "<small>" + cur + "</small></div>");
+      b.onclick = function () { m[k] = on ? "none" : o[0]; draw(); renderRows(); refreshBar(); };
+      grid.appendChild(b);
+    });
+  };
+  draw(); dlg.appendChild(grid);
+  var end = el("div", "end"), done = el("button", "btn pri", "Done");
+  done.onclick = function () { document.body.removeChild(veil); };
+  veil.onclick = function (e) { if (e.target == veil) done.onclick(); };
+  end.appendChild(done); dlg.appendChild(end); veil.appendChild(dlg); document.body.appendChild(veil);
+}
+function renderSettings() {
+  var o = $("settings"); o.innerHTML = "";
   SWITCHES.forEach(function (s) {
-    var row = el("div", "setting");
-    row.appendChild(el("div", "", '<div class="t">' + s[1] + "</div>" + (s[2] ? '<div class="d">' + s[2] + "</div>" : "")));
-    var cb = el("input", "switch"); cb.type = "checkbox"; cb.checked = m[s[0]] == "1";
-    cb.onchange = function () { m[s[0]] = cb.checked ? "1" : "0"; refreshBar(); renderPresets(); };
-    row.appendChild(cb); o.appendChild(row);
+    var row = el("div", "set", '<div><div class="t">' + s[1] + "</div>" + (s[2] ? '<div class="d">' + s[2] + "</div>" : "") + "</div>");
+    var t = el("button", "tog" + (m[s[0]] == "1" ? " on" : ""));
+    t.onclick = function () { m[s[0]] = m[s[0]] == "1" ? "0" : "1"; renderSettings(); renderRows(); refreshBar(); };
+    row.appendChild(t); o.appendChild(row);
   });
   STEPS.forEach(function (s) {
-    var row = el("div", "setting");
-    row.appendChild(el("div", "", '<div class="t">' + s[1] + "</div>" + (s[2] ? '<div class="d">' + s[2] + "</div>" : "")));
-    var st = el("div", "step"), minus = el("button", "", "−"), plus = el("button", "", "+"), out = el("output");
-    var show = function () { out.textContent = m[s[0]] + "%"; };
-    var add = function (d) {
-      m[s[0]] = String(Math.min(s[4], Math.max(s[3], (+m[s[0]] || 0) + d)));
-      show(); refreshBar(); renderPresets();
-    };
+    var row = el("div", "set", '<div><div class="t">' + s[1] + "</div>" + (s[2] ? '<div class="d">' + s[2] + "</div>" : "") + "</div>");
+    var st = el("div", "step"), minus = el("button", "", "−"), plus = el("button", "", "+"), out = el("output", "", (m[s[0]] || 0) + "%");
+    var add = function (d) { m[s[0]] = String(Math.min(s[4], Math.max(s[3], (+m[s[0]] || 0) + d))); out.textContent = m[s[0]] + "%"; refreshBar(); };
     minus.onclick = function () { add(-1); }; plus.onclick = function () { add(1); };
-    show(); st.appendChild(minus); st.appendChild(out); st.appendChild(plus); row.appendChild(st); o.appendChild(row);
+    st.appendChild(minus); st.appendChild(out); st.appendChild(plus); row.appendChild(st); o.appendChild(row);
   });
-  refreshBar();
 }
-function editing() {
-  status("Editing controller <b>" + ctl.slot + "</b> · preset <b>" + esc(m.preset || "custom") + "</b>");
-}
-function loadMapping() {
+function render() { renderRows(); renderSettings(); refreshBar(); }
+function load() {
   if (!ctl) return;
-  fetch("/mapping" + q()).then(function (r) { return r.ok ? r.text() : Promise.reject(); })
-    .then(function (t) { m = parse(t); saved = parse(t); renderMapping(); renderPresets(); editing(); })
-    .catch(function () {});
+  var name = ctl.profile;
+  fetch("/profile?name=" + name).then(function (r) { return r.ok ? r.text() : Promise.reject(); })
+    .then(function (t) { m = parse(t); saved = parse(t); loaded = name; render(); }).catch(function () {});
 }
 function gone(e) {
-  status(e.message == "controller changed" ? "<b>That controller was disconnected.</b>" : "<b>Failed:</b> " + esc(e.message), "err");
-  throw e;
-}
-function activate(text, preset) {            /* make it the selected controller's mapping */
-  var p = parse(text);
-  return post("/mapping" + q(), format(p, preset)).catch(gone).then(function () {
-    p.preset = preset; m = p; saved = parse(format(p, preset)); ctl.preset = preset;
-    renderMapping(); renderCtls(); renderPresets();
-  });
+  say(e.message == "controller changed" ? "That controller was disconnected." : "Failed: " + e.message, "err");
 }
 function apply() {
+  if (!ctl || ctl.profile == DEFAULT) return;
+  var name = ctl.profile;
+  post("/profile/apply?name=" + name, format(m)).then(function () {
+    saved = parse(format(m)); render();
+    var users = ctls.filter(function (c) { return c.profile == name; }).length;
+    say("Saved to " + name + (users > 1 ? ", used by " + users + " controllers." : "."), "ok");
+  }).catch(function (e) { say("Not saved: " + e.message, "err"); });
+}
+function saveNew() {
   if (!ctl) return;
-  var preset = same(m, saved) ? m.preset : "";
-  post("/mapping" + q(), format(m, preset)).catch(gone).then(function () {
-    m.preset = preset; saved = parse(format(m, preset)); ctl.preset = preset;
-    renderMapping(); renderCtls(); renderPresets();
-    status("<b>Applied</b> to controller " + ctl.slot + (preset ? "." : ". It is a custom mapping now: save it as a preset to reuse it."), "ok");
-  }).catch(function () {});
+  post("/profile/new?" + q(), format(m)).then(function (name) {
+    ctl.profile = name; loaded = name; saved = parse(format(m));
+    if (profiles.indexOf(name) < 0) profiles.push(name);
+    render(); renderPads(); renderProfiles();
+    say("Saved as new profile " + name + ".", "ok");
+  }).catch(function (e) {
+    say(e.message == "no free profile" ? "All " + ALL.length + " profiles are taken. Delete one first." : "Not saved: " + e.message, "err");
+  });
 }
-function revert() {
-  m = parse(format(saved, saved.preset)); m.preset = saved.preset;
-  renderMapping(); renderPresets(); status("Changes undone.");
-}
-function loadDefault() {
-  if (!ctl) return;
-  fetch("/mapping/default").then(function (r) { return r.text(); })
-    .then(function (t) { return activate(t, DEFAULT); })
-    .then(function () { status("<b>Default mapping</b> on controller " + ctl.slot + ".", "ok"); }).catch(function () {});
-}
+function undo() { m = parse(format(saved)); render(); }
 
-/* ── presets ── */
-function listPresets() {
-  return fetch("/presets").then(function (r) { return r.text(); }).then(function (t) {
-    presets = [DEFAULT].concat(t.split("\n").filter(Boolean)); renderPresets();
-  });
-}
-function renderPresets() {
-  var box = $("presets"); box.innerHTML = "";
-  presets.forEach(function (n) {
-    var cur = !!ctl && m.preset == n && !dirty();
-    var row = el("div", "preset" + (cur ? " cur" : ""));
-    row.appendChild(el("div", "n", esc(n)));
-    if (n == DEFAULT) row.appendChild(el("span", "tag dim", "built in"));
-    if (cur) row.appendChild(el("span", "tag", "in use"));
-    else {
-      var load = el("button", "btn small", "Load");
-      load.disabled = !ctl; load.onclick = function () { loadPreset(n); }; row.appendChild(load);
-    }
-    if (n != DEFAULT) {
-      var del = el("button", "btn small danger" + (armed == n ? " armed" : ""), armed == n ? "Sure?" : "Delete");
-      del.onclick = function () { deletePreset(n); }; row.appendChild(del);
-    }
-    box.appendChild(row);
-  });
-}
-function loadPreset(n) {
-  if (!ctl) return;
-  if (n == DEFAULT) return loadDefault();
-  post("/preset/get", n).then(function (t) { return activate(t, n); })
-    .then(function () { $("name").value = n; status("Preset <b>" + esc(n) + "</b> on controller " + ctl.slot + ".", "ok"); })
-    .catch(function (e) { if (e.message != "controller changed") status("<b>Not loaded:</b> " + esc(e.message), "err"); });
-}
-function savePreset() {
-  var n = $("name").value.trim();
-  if (!n || n.toLowerCase() == DEFAULT.toLowerCase()) { status("<b>Type a name</b> for the new preset (not “Default”).", "warn"); return; }
-  post("/preset/save", n + "\n" + format(m, n))
-    .then(listPresets)
-    .then(function () { return ctl && activate(format(m, n), n); })
-    .then(function () { status("Saved as preset <b>" + esc(n) + "</b>.", "ok"); })
-    .catch(function (e) {
-      status("<b>Not saved:</b> " + (e.message == "bad name" ? "use letters, digits, spaces, - or _." : esc(e.message)), "err");
-    });
-}
-function deletePreset(n) {
-  if (armed != n) {                            /* first click arms, second deletes */
-    armed = n; renderPresets();
-    setTimeout(function () { if (armed == n) { armed = null; renderPresets(); } }, 4000);
-    return;
-  }
-  armed = null;
-  post("/preset/delete", n).then(listPresets)
-    .then(function () { status("Preset <b>" + esc(n) + "</b> deleted. Controllers keep their current mapping."); })
-    .catch(function (e) { status("<b>Not deleted:</b> " + esc(e.message), "err"); });
+/* ── tabs ── */
+function tab(which) {
+  ["B", "S", "H"].forEach(function (t) { $("tab" + t).className = t == which ? "on" : ""; $("page" + t).classList.toggle("hidden", t != which); });
+  $("title").textContent = { B: "Buttons", S: "Sticks & triggers", H: "Help" }[which];
 }
 
 /* ── live status ── */
+function reloadNow() { clearTimeout(poll.t); poll.key = ""; poll(); }
 function poll() {
   fetch("/status").then(function (r) { return r.json(); }).then(function (s) {
-    $("dot").className = "dot on"; $("livetxt").textContent = "Connected";
-    $("ver").textContent = s.version;
-    var key = JSON.stringify(s.controllers.map(function (c) { return [c.slot, c.id, c.preset, c.pad]; }));
+    $("live").className = "live on"; $("ver").textContent = s.version;
+    var key = JSON.stringify([s.profiles, s.controllers.map(function (c) { return [c.slot, c.id, c.profile, c.pad, c.nintendo]; })]);
     if (key != poll.key) {
-      poll.key = key; ctls = s.controllers;
-      var before = ctl, match = null;
+      poll.key = key; ctls = s.controllers; profiles = s.profiles;
+      var match = null;
       ctls.forEach(function (c) { if (sameCtl(c, ctl)) match = c; });
       ctl = match || ctls[0] || null;
-      renderCtls();
-      $("left").classList.toggle("hidden", !ctl);
-      $("optsPanel").classList.toggle("hidden", !ctl);
-      if (!ctl) { m = {}; saved = {}; refreshBar(); renderPresets(); }
-      /* a new selection, or its preset was switched from the gamepad */
-      else if (!sameCtl(before, ctl) || (!dirty() && (ctl.preset || "") != (saved.preset || ""))) loadMapping();
+      renderPads(); renderProfiles();
+      /* a new selection, or its profile changed from the gamepad */
+      if (!ctl) { m = {}; saved = {}; loaded = null; refreshBar(); $("rows").innerHTML = ""; }
+      else if (ctl.profile != loaded && !changes()) load();
+      else refreshBar();
     }
-    var hot = {}, live = null;
+    var live = null, hot = {};
     s.controllers.forEach(function (c) { if (sameCtl(c, ctl)) live = c; });
     if (live) IN.forEach(function (k, i) {
-      if (live.buttons & (1 << i) || (k == "lt" && live.lt > 20) || (k == "rt" && live.rt > 20)) hot[k] = 1;
+      if (live.buttons & (1 << i) || (k == "lt" && live.lt > 20) || (k == "rt" && live.rt > 20)) hot[m[k]] = 1;
     });
-    IN.forEach(function (k) { var r = $("row_" + k); if (r) r.className = "map" + (hot[k] ? " hot" : ""); });
-    $("banner").textContent = live && !live.analog ? "This controller uses the Switch protocol (8BitDo adapter or Switch Pro): " +
-      "LT and RT are on / off only, without analog travel. Wired Xbox controllers have analog triggers." : "";
+    OUT.forEach(function (o) { var r = $("row_" + o[0]); if (r) r.classList.toggle("hot", !!hot[o[0]]); });
+    $("banner").classList.toggle("hidden", !(live && live.switch));
   }).catch(function () {
-    $("dot").className = "dot"; $("livetxt").textContent = "Payload not reachable";
-  }).then(function () { setTimeout(poll, document.hidden ? 2000 : 250); });
+    $("live").className = "live"; $("ver").textContent = "payload not reachable";
+  }).then(function () { poll.t = setTimeout(poll, document.hidden ? 2000 : 250); });
 }
-listPresets(); poll();
+
+$("tabB").onclick = function () { tab("B"); }; $("tabS").onclick = function () { tab("S"); }; $("tabH").onclick = function () { tab("H"); };
+$("lbX").onclick = function () { setLabels(0); }; $("lbN").onclick = function () { setLabels(1); };
+$("undo").onclick = undo; $("apply").onclick = apply; $("saveNew").onclick = saveNew;
+poll();
 </script>
 </body>
 </html>

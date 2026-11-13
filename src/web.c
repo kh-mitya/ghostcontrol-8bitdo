@@ -26,7 +26,6 @@
 INCASSET(web_index_html, "assets/index.html");
 
 static int g_listen = -1, g_port;
-static const char *g_presets_dir;
 static struct timespec g_retry_at;
 
 static int listen_on(int port) {
@@ -45,8 +44,7 @@ static int listen_on(int port) {
     return 0;
 }
 
-int web_start(int port, const char *presets_dir) {
-    g_presets_dir = presets_dir;
+int web_start(int port) {
     g_port = port;
     clock_gettime(CLOCK_MONOTONIC, &g_retry_at);
     return listen_on(port);
@@ -69,6 +67,19 @@ static void respond(int c, int code, const char *type, const char *body, size_t 
                      type, len);
     send_all(c, head, (size_t)n);
     send_all(c, body, len);
+}
+
+/* Copies the value of `key` from a query string; "" when absent. */
+static void param(const char *query, const char *key, char *out, size_t size) {
+    out[0] = '\0';
+    size_t klen = strlen(key);
+    for (const char *q = query; q && *q; q = strchr(q, '&') ? strchr(q, '&') + 1 : NULL) {
+        if (strncmp(q, key, klen) != 0 || q[klen] != '=') continue;
+        q += klen + 1;
+        size_t n = strspn(q, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-");
+        if (n < size) { memcpy(out, q, n); out[n] = '\0'; }
+        return;
+    }
 }
 
 static void serve(int c) {
@@ -98,83 +109,55 @@ static void serve(int c) {
     char *path = req + (post ? 5 : 4);
     if (!post && strncmp(req, "GET ", 4) != 0) { respond(c, 400, "text/plain", "method", 6); return; }
     path[strcspn(path, " \r\n")] = '\0';
-    /* ?slot=N&id=X (ids are [A-Za-z0-9-] only) */
-    char *query = strchr(path, '?'), id[64] = "";
-    int slot = 0;
-    if (query) {
-        *query++ = '\0';
-        char *v = strstr(query, "slot=");
-        if (v) slot = atoi(v + 5);
-        if ((v = strstr(query, "id=")) != NULL) {
-            size_t n = strspn(v + 3, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-");
-            if (n < sizeof(id)) { memcpy(id, v + 3, n); id[n] = '\0'; }
-        }
-    }
+    /* ?slot=N&id=X&name=X&to=X&profile=X&labels=X; values are [A-Za-z0-9-] */
+    char *query = strchr(path, '?');
+    char id[64], name[PROFILE_NAME_MAX + 1], to[PROFILE_NAME_MAX + 1], profile[PROFILE_NAME_MAX + 1], labels[16];
+    if (query) *query++ = '\0';
+    param(query, "id", id, sizeof(id));
+    param(query, "name", name, sizeof(name));
+    param(query, "to", to, sizeof(to));
+    param(query, "profile", profile, sizeof(profile));
+    param(query, "labels", labels, sizeof(labels));
+    char slot_s[8];
+    param(query, "slot", slot_s, sizeof(slot_s));
+    int slot = atoi(slot_s);
 
-    char file[192], text[4096];
+    struct gc_profile p;
     if (!post && strcmp(path, "/") == 0) {
         respond(c, 200, "text/html; charset=utf-8", web_index_html, web_index_html_size);
     } else if (!post && strcmp(path, "/status") == 0) {
         size_t len = gc_status_json(out, sizeof(out));
         respond(c, 200, "application/json", out, len);
-    } else if (!post && strcmp(path, "/mapping") == 0) {
-        struct gc_profile p;
-        if (gc_mapping_get(slot, id, &p) != 0) { respond(c, 409, "text/plain", "controller changed", 18); return; }
+    } else if (!post && strcmp(path, "/profile") == 0) {
+        if (gc_profile_get(name, &p) != 0) { respond(c, 404, "text/plain", "no such profile", 15); return; }
         size_t len = mapper_format(&p, out, sizeof(out));
         respond(c, 200, "text/plain; charset=utf-8", out, len);
-    } else if (!post && strcmp(path, "/mapping/default") == 0) {
-        struct gc_profile def;
-        mapper_load_preset(g_presets_dir, PRESET_DEFAULT, &def);
-        size_t len = mapper_format(&def, out, sizeof(out));
-        respond(c, 200, "text/plain; charset=utf-8", out, len);
-    } else if (post && strcmp(path, "/mapping") == 0) {
-        struct gc_profile p;
+    } else if (post && (strcmp(path, "/profile/apply") == 0 || strcmp(path, "/profile/new") == 0)) {
         int bad = mapper_parse(body, &p);
         if (bad) {
             int len = snprintf(out, sizeof(out), "error on line %d", bad);
             respond(c, 400, "text/plain", out, (size_t)len);
             return;
         }
-        if (gc_mapping_set(slot, id, &p) != 0) respond(c, 409, "text/plain", "controller changed", 18);
-        else respond(c, 200, "text/plain", "applied", 7);
-    } else if (!post && strcmp(path, "/presets") == 0) {
-        static char names[PRESETS_MAX][PRESET_NAME_MAX + 1];   /* one name per line */
-        int count = mapper_preset_names(g_presets_dir, names, PRESETS_MAX);
-        size_t len = 0;
-        for (int i = 0; i < count; i++)
-            len += (size_t)snprintf(out + len, sizeof(out) - len, "%s\n", names[i]);
-        respond(c, 200, "text/plain; charset=utf-8", out, len);
-    } else if (post && (strcmp(path, "/preset/get") == 0 || strcmp(path, "/preset/delete") == 0 ||
-                        strcmp(path, "/preset/save") == 0)) {
-        /* body: preset name, then (save only) a newline and the mapping */
-        char *nl = strchr(body, '\n');
-        if (nl) *nl = '\0';
-        if (!mapper_valid_name(body) || strcasecmp(body, PRESET_DEFAULT) == 0) {
-            respond(c, 400, "text/plain", "bad name", 8);
-            return;
-        }
-        snprintf(file, sizeof(file), "%s/%s.ini", g_presets_dir, body);
-        if (path[8] == 'g') {
-            int n = mapper_read_file(file, text, sizeof(text));
-            if (n < 0) respond(c, 404, "text/plain", "no such preset", 14);
-            else respond(c, 200, "text/plain; charset=utf-8", text, (size_t)n);
-        } else if (path[8] == 'd') {
-            if (unlink(file) != 0) respond(c, 404, "text/plain", "no such preset", 14);
-            else respond(c, 200, "text/plain", "deleted", 7);
+        if (path[9] == 'a') {
+            if (gc_profile_apply(name, &p) != 0) respond(c, 400, "text/plain", "cannot save", 11);
+            else respond(c, 200, "text/plain", name, strlen(name));
         } else {
-            struct gc_profile p;
-            int bad = nl ? mapper_parse(nl + 1, &p) : -1;
-            if (bad) {
-                int len = snprintf(out, sizeof(out), "error on line %d", bad);
-                respond(c, 400, "text/plain", out, (size_t)len);
-                return;
-            }
-            snprintf(p.preset, sizeof(p.preset), "%s", body);
-            size_t len = mapper_format(&p, text, sizeof(text));
-            mkdir(g_presets_dir, 0755);
-            if (mapper_write_file(file, text, len) != 0) respond(c, 400, "text/plain", "cannot write", 12);
-            else respond(c, 200, "text/plain", "saved", 5);
+            const char *made = gc_profile_new(slot, id, &p);
+            if (!made) respond(c, 409, "text/plain", "no free profile", 15);
+            else respond(c, 200, "text/plain", made, strlen(made));
         }
+    } else if (post && strcmp(path, "/profile/delete") == 0) {
+        if (gc_profile_delete(name) != 0) respond(c, 404, "text/plain", "no such profile", 15);
+        else respond(c, 200, "text/plain", "deleted", 7);
+    } else if (post && strcmp(path, "/profile/rename") == 0) {
+        if (gc_profile_rename(name, to) != 0) respond(c, 409, "text/plain", "cannot rename", 13);
+        else respond(c, 200, "text/plain", to, strlen(to));
+    } else if (post && strcmp(path, "/controller") == 0) {
+        int nintendo = !strcmp(labels, "nintendo") ? 1 : !strcmp(labels, "xbox") ? 0 : -1;
+        if (gc_controller_set(slot, id, profile[0] ? profile : NULL, nintendo) != 0)
+            respond(c, 409, "text/plain", "controller changed", 18);
+        else respond(c, 200, "text/plain", "ok", 2);
     } else {
         respond(c, 404, "text/plain", "not found", 9);
     }

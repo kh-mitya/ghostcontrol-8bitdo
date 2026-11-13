@@ -48,8 +48,8 @@
 #define LOG_PATH  DATA_DIR "/ghostcontrol-8bitdo.log"
 #define LOCK_PATH DATA_DIR "/gc_main.pid"   /* same lock as GhostControl 1.x */
 #define STOP_PATH DATA_DIR "/stop"
-#define PRESETS_DIR  DATA_DIR "/presets"
-#define MAPS_DIR     DATA_DIR "/controllers"   /* mapping of each controller seen */
+#define PROFILES_DIR DATA_DIR "/profiles"
+#define CTRL_DIR     DATA_DIR "/controllers"   /* profile and labels of each controller seen */
 
 extern int32_t sceUserServiceInitialize(void *params);
 extern int32_t sceUserServiceGetInitialUser(int32_t *user);
@@ -121,9 +121,11 @@ struct slot {
     int32_t user;                    /* bound user, -1 = the console asks */
     long last_rx, last_inject, retry_at;
     struct gc_combo combo;
-    char ident[48];                  /* stable controller id, file name of its mapping */
-    struct gc_profile map;           /* this controller's mapping */
-    struct gc_guide guide;           /* Xbox + LB/RB preset switch */
+    char ident[48];                  /* stable controller id, file name of its settings */
+    char profile[PROFILE_NAME_MAX + 1];
+    int nintendo;                    /* page shows Nintendo labels (Switch protocol only) */
+    struct gc_profile map;           /* mapping of that profile */
+    struct gc_guide guide;           /* Xbox + LB/RB profile switch */
 };
 static struct slot g_slots[MAX_SLOTS];
 
@@ -276,45 +278,77 @@ static void make_ident(int fd, const struct gc_usb_identity *id, char *out, size
     }
 }
 
-static void map_path(const struct slot *s, char *out, size_t size) {
-    snprintf(out, size, MAPS_DIR "/%s.ini", s->ident);
+static void ctrl_path(const char *ident, char *out, size_t size) {
+    snprintf(out, size, CTRL_DIR "/%s.ini", ident);
 }
 
-static void load_map(struct slot *s) {
-    char path[128];
-    map_path(s, path, sizeof(path));
-    if (mapper_load_file(path, &s->map) != 0)
-        mapper_load_preset(PRESETS_DIR, PRESET_DEFAULT, &s->map);
+static void store_ctrl(const struct slot *s) {
+    char path[128], text[96];
+    ctrl_path(s->ident, path, sizeof(path));
+    int n = snprintf(text, sizeof(text), "profile = %s\nlabels = %s\n", s->profile,
+                     s->nintendo ? "nintendo" : "xbox");
+    mkdir(CTRL_DIR, 0755);
+    if (mapper_write_file(path, text, (size_t)n) != 0) gc_log("%s: cannot save its settings", s->path);
 }
 
-static void store_map(struct slot *s) {
-    char path[128];
-    map_path(s, path, sizeof(path));
-    mkdir(MAPS_DIR, 0755);
-    if (mapper_save_file(path, &s->map) != 0) gc_log("%s: cannot save its mapping", s->path);
+/* Switch the slot to a profile; a missing one falls back to Default. */
+static void use_profile(struct slot *s, const char *name) {
+    if (mapper_profile_load(PROFILES_DIR, name, &s->map) != 0) {
+        name = PROFILE_DEFAULT;
+        mapper_defaults(&s->map);
+    }
+    if (name != s->profile) snprintf(s->profile, sizeof(s->profile), "%s", name);
 }
 
-static void cycle_preset(struct slot *s, int dir) {
-    static char names[PRESETS_MAX + 1][PRESET_NAME_MAX + 1];
-    int n = 1 + mapper_preset_names(PRESETS_DIR, names + 1, PRESETS_MAX);
-    snprintf(names[0], sizeof(names[0]), "%s", PRESET_DEFAULT);
+static void load_ctrl(struct slot *s) {
+    char path[128], text[256], name[PROFILE_NAME_MAX + 1] = PROFILE_DEFAULT;
+    ctrl_path(s->ident, path, sizeof(path));
+    s->nintendo = 0;
+    if (mapper_read_file(path, text, sizeof(text)) >= 0) {
+        char *v = strstr(text, "profile = ");
+        if (v) { v += 10; size_t n = strcspn(v, "\r\n"); if (n < sizeof(name)) { memcpy(name, v, n); name[n] = '\0'; } }
+        s->nintendo = strstr(text, "labels = nintendo") != NULL;
+    }
+    use_profile(s, name);
+}
+
+/* Point every controller file that names profile `from` at `to` (rename or
+ * delete), so a later profile with a reused name is not picked up by them. */
+static void retarget_ctrl_files(const char *from, const char *to) {
+    DIR *d = opendir(CTRL_DIR);
+    struct dirent *e;
+    char want[48];
+    snprintf(want, sizeof(want), "profile = %s\n", from);
+    while (d && (e = readdir(d)) != NULL) {
+        char path[160], text[256];
+        snprintf(path, sizeof(path), CTRL_DIR "/%s", e->d_name);
+        if (mapper_read_file(path, text, sizeof(text)) < 0 || !strstr(text, want)) continue;
+        char out[256];
+        int n = snprintf(out, sizeof(out), "profile = %s\nlabels = %s\n", to,
+                         strstr(text, "labels = nintendo") ? "nintendo" : "xbox");
+        mapper_write_file(path, out, (size_t)n);
+    }
+    if (d) closedir(d);
+}
+
+static void cycle_profile(struct slot *s, int dir) {
+    const char *names[PROFILES_MAX + 1];
+    names[0] = PROFILE_DEFAULT;
+    int n = 1 + mapper_profile_names(PROFILES_DIR, names + 1);
     int cur = 0;
-    for (int i = 0; i < n; i++) if (strcmp(names[i], s->map.preset) == 0) cur = i;
-    int next = (cur + dir + n) % n;
-    struct gc_profile p;
-    char msg[128];
-    if (mapper_load_preset(PRESETS_DIR, names[next], &p) != 0) return;
-    s->map = p;
-    store_map(s);
-    snprintf(msg, sizeof(msg), "Controller %d: preset %s", (int)(s - g_slots) + 1, p.preset);
+    for (int i = 0; i < n; i++) if (strcmp(names[i], s->profile) == 0) cur = i;
+    use_profile(s, names[(cur + dir + n) % n]);
+    store_ctrl(s);
+    char msg[96];
+    snprintf(msg, sizeof(msg), "Controller %d: %s", (int)(s - g_slots) + 1, s->profile);
     notify(msg);
 }
 
 static void inject(struct slot *s, long now) {
     ScePadData p;
     struct gc_input in = s->in;
-    int dir = mapper_preset_combo(&s->guide, &in.buttons, now);
-    if (dir) cycle_preset(s, dir);
+    int dir = mapper_profile_combo(&s->guide, &in.buttons, now);
+    if (dir) cycle_profile(s, dir);
     mapper_apply(&s->map, &in, &s->combo, now, &p);
     scePadVirtualDeviceInsertData(s->pad, &p);
     s->last_inject = now;
@@ -401,7 +435,7 @@ static int slot_open(struct slot *s, const char *path) {
     s->fd = fd; s->id = id; s->used = 1;
     s->in.lx = s->in.ly = s->in.rx = s->in.ry = 128;   /* centred until the first report */
     make_ident(fd, &id, s->ident, sizeof(s->ident));
-    load_map(s);
+    load_ctrl(s);
     snprintf(s->path, sizeof(s->path), "%s", path);
     if (maxpkt == 0 || maxpkt > 64 || (id.kind == GC_KIND_SWITCH && maxpkt != 64)) {
         slot_close(s, "unexpected packet size");
@@ -426,8 +460,8 @@ static int slot_open(struct slot *s, const char *path) {
     s->eps[0].timeout = id.kind == GC_KIND_SWITCH ? 200 : 0;   /* GIP may stay silent */
     s->eps[0].flags = USB_FS_FLAG_SINGLE_SHORT_OK | USB_FS_FLAG_MULTI_SHORT_OK;
     s->last_rx = now_ms();
-    gc_log("%s: %s %04x:%04x open, id %s, preset %s", path, kind_name(id.kind), id.vid, id.pid,
-           s->ident, s->map.preset[0] ? s->map.preset : "custom");
+    gc_log("%s: %s %04x:%04x open, id %s, profile %s", path, kind_name(id.kind), id.vid, id.pid,
+           s->ident, s->profile);
     char msg[96];
     snprintf(msg, sizeof(msg), VERSION ": controller %d (%s) found, press any button",
              (int)(s - g_slots) + 1, kind_name(id.kind));
@@ -534,27 +568,28 @@ static int slot_poll(struct slot *s, long now) {
     return got;
 }
 
-/* For the mapping page: what is connected and what is pressed right now. */
+/* For the mapping page: what is connected, what is pressed right now, and
+ * which profiles exist. */
 size_t gc_status_json(char *buf, size_t size) {
     size_t n = 0;
-    int w = snprintf(buf, size, "{\"version\":\"" VERSION "\",\"controllers\":[");
-    if (w > 0) n = (size_t)w;
-    for (int i = 0, first = 1; i < MAX_SLOTS && n < size; i++) {
+#define PUT(...) do { int w = snprintf(buf + n, n < size ? size - n : 0, __VA_ARGS__); \
+                      if (w > 0) n += (size_t)w; } while (0)
+    PUT("{\"version\":\"" VERSION "\",\"controllers\":[");
+    for (int i = 0, first = 1; i < MAX_SLOTS; i++) {
         const struct slot *s = &g_slots[i];
         if (!s->used) continue;
-        w = snprintf(buf + n, size - n,
-                     "%s{\"slot\":%d,\"id\":\"%s\",\"preset\":\"%s\",\"analog\":%d,"
-                     "\"vid\":\"%04x\",\"pid\":\"%04x\",\"pad\":%d,\"buttons\":%u,"
-                     "\"lt\":%u,\"rt\":%u}",
-                     first ? "" : ",", i + 1, s->ident, s->map.preset, s->id.kind == GC_KIND_GIP,
-                     s->id.vid, s->id.pid, s->pad >= 0, (unsigned)s->in.buttons, s->in.lt, s->in.rt);
-        if (w > 0) n += (size_t)w;
+        PUT("%s{\"slot\":%d,\"id\":\"%s\",\"profile\":\"%s\",\"switch\":%d,\"nintendo\":%d,"
+            "\"vid\":\"%04x\",\"pid\":\"%04x\",\"pad\":%d,\"buttons\":%u,\"lt\":%u,\"rt\":%u}",
+            first ? "" : ",", i + 1, s->ident, s->profile, s->id.kind == GC_KIND_SWITCH, s->nintendo,
+            s->id.vid, s->id.pid, s->pad >= 0, (unsigned)s->in.buttons, s->in.lt, s->in.rt);
         first = 0;
     }
-    if (n < size) {
-        w = snprintf(buf + n, size - n, "]}");
-        if (w > 0) n += (size_t)w;
-    }
+    const char *names[PROFILES_MAX];
+    int count = mapper_profile_names(PROFILES_DIR, names);
+    PUT("],\"profiles\":[\"" PROFILE_DEFAULT "\"");
+    for (int i = 0; i < count; i++) PUT(",\"%s\"", names[i]);
+    PUT("]}");
+#undef PUT
     return n < size ? n : size - 1;
 }
 
@@ -564,18 +599,73 @@ static struct slot *slot_by(int slot, const char *id) {
     return s->used && strcmp(s->ident, id) == 0 ? s : NULL;
 }
 
-int gc_mapping_get(int slot, const char *id, struct gc_profile *out) {
-    struct slot *s = slot_by(slot, id);
-    if (!s) return -1;
-    *out = s->map;
+/* Reload every connected controller that uses profile `name`. */
+static void reload_users(const char *name, const char *now_name) {
+    for (int i = 0; i < MAX_SLOTS; i++) {
+        struct slot *s = &g_slots[i];
+        if (!s->used || strcmp(s->profile, name) != 0) continue;
+        use_profile(s, now_name);
+    }
+}
+
+int gc_profile_get(const char *name, struct gc_profile *out) {
+    return mapper_profile_load(PROFILES_DIR, name, out);
+}
+
+int gc_profile_apply(const char *name, const struct gc_profile *p) {
+    if (mapper_profile_save(PROFILES_DIR, name, p) != 0) return -1;
+    reload_users(name, name);
     return 0;
 }
 
-int gc_mapping_set(int slot, const char *id, const struct gc_profile *p) {
+const char *gc_profile_new(int slot, const char *id, const struct gc_profile *p) {
+    struct slot *s = slot_by(slot, id);
+    if (!s) return NULL;
+    const char *names[PROFILES_MAX];
+    int count = mapper_profile_names(PROFILES_DIR, names);
+    for (int i = 0; i < PROFILES_MAX; i++) {
+        const char *name = mapper_profile_list[i];
+        int taken = 0;
+        for (int j = 0; j < count; j++) taken |= names[j] == name;
+        if (taken) continue;
+        if (mapper_profile_save(PROFILES_DIR, name, p) != 0) return NULL;
+        use_profile(s, name);
+        store_ctrl(s);
+        return name;
+    }
+    return NULL;   /* all names taken */
+}
+
+int gc_profile_delete(const char *name) {
+    char path[160];
+    if (mapper_profile_index(name) < 0) return -1;
+    snprintf(path, sizeof(path), PROFILES_DIR "/%s.ini", name);
+    if (unlink(path) != 0) return -1;
+    reload_users(name, PROFILE_DEFAULT);
+    retarget_ctrl_files(name, PROFILE_DEFAULT);
+    return 0;
+}
+
+int gc_profile_rename(const char *from, const char *to) {
+    char a[160], b[160];
+    if (mapper_profile_index(from) < 0 || mapper_profile_index(to) < 0) return -1;
+    snprintf(a, sizeof(a), PROFILES_DIR "/%s.ini", from);
+    snprintf(b, sizeof(b), PROFILES_DIR "/%s.ini", to);
+    if (access(b, F_OK) == 0 || rename(a, b) != 0) return -1;
+    reload_users(from, to);
+    retarget_ctrl_files(from, to);
+    return 0;
+}
+
+int gc_controller_set(int slot, const char *id, const char *profile, int nintendo) {
     struct slot *s = slot_by(slot, id);
     if (!s) return -1;
-    s->map = *p;
-    store_map(s);
+    if (profile) {
+        if (strcmp(profile, PROFILE_DEFAULT) != 0 && mapper_profile_index(profile) < 0) return -1;
+        use_profile(s, profile);
+    }
+    if (nintendo >= 0) s->nintendo = nintendo;
+    store_ctrl(s);
     return 0;
 }
 
@@ -618,7 +708,7 @@ int main(void) {
     sceUserServiceInitialize(NULL);
     int r1 = scePadInit(), r2 = scePadSetProcessPrivilege(1);
     if (r1 || r2) gc_log("scePadInit 0x%08x, privilege 0x%08x", (unsigned)r1, (unsigned)r2);
-    if (web_start(WEB_PORT, PRESETS_DIR) != 0)
+    if (web_start(WEB_PORT) != 0)
         gc_log("mapping page: port %d busy (errno %d), retrying", WEB_PORT, errno);
     int sc = shortcut_install();
     if (sc < 0) gc_log("home-screen shortcut failed (0x%08x)", (unsigned)sc);
