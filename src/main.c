@@ -579,6 +579,10 @@ int gc_mapping_set(int slot, const char *id, const struct gc_profile *p) {
     return 0;
 }
 
+void gc_web_ready(void) {
+    gc_log("mapping page: port %d ready", WEB_PORT);
+}
+
 int main(void) {
     mkdir(DATA_DIR, 0755);
     int lock = open(LOCK_PATH, O_RDWR | O_CREAT, 0600);
@@ -615,9 +619,10 @@ int main(void) {
     int r1 = scePadInit(), r2 = scePadSetProcessPrivilege(1);
     if (r1 || r2) gc_log("scePadInit 0x%08x, privilege 0x%08x", (unsigned)r1, (unsigned)r2);
     if (web_start(WEB_PORT, PRESETS_DIR) != 0)
-        gc_log("mapping page unavailable: port %d (errno %d)", WEB_PORT, errno);
+        gc_log("mapping page: port %d busy (errno %d), retrying", WEB_PORT, errno);
     int sc = shortcut_install();
-    if (sc) gc_log(sc > 0 ? "home-screen shortcut installed" : "home-screen shortcut failed (%d)", sc);
+    if (sc < 0) gc_log("home-screen shortcut failed (0x%08x)", (unsigned)sc);
+    else gc_log(sc ? "home-screen shortcut installed" : "home-screen shortcut registered");
     notify(VERSION " started");
 
     for (int i = 0; i < MAX_SLOTS; i++) { g_slots[i].fd = -1; g_slots[i].pad = -1; }

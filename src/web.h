@@ -7,7 +7,7 @@
  * gives it time with web_poll(); a request is answered in one go. */
 #define WEB_PORT 8096
 
-int web_start(int port, const char *presets_dir);   /* 0 ok */
+int web_start(int port, const char *presets_dir);   /* 0 ok, else retried in web_poll */
 void web_poll(int timeout_ms);                       /* wait for and serve one request */
 
 /* Provided by main.c. Connected controllers as JSON ("analog":0 = triggers
@@ -17,3 +17,6 @@ void web_poll(int timeout_ms);                       /* wait for and serve one r
 size_t gc_status_json(char *buf, size_t size);
 int gc_mapping_get(int slot, const char *id, struct gc_profile *out);
 int gc_mapping_set(int slot, const char *id, const struct gc_profile *p);
+
+/* Called by web_poll once a port that was busy at web_start is taken. */
+void gc_web_ready(void);

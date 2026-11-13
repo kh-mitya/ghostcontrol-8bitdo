@@ -40,6 +40,7 @@ static const char param_json[] =
 
 extern int sceAppInstUtilInitialize(void);
 extern int sceAppInstUtilTerminate(void);
+extern int sceAppInstUtilAppInstallAll(void *);
 
 static int same(const char *path, const void *data, size_t size) {
     struct stat st;
@@ -62,22 +63,31 @@ static int write_file(const char *path, const void *data, size_t size) {
 }
 
 int shortcut_install(void) {
-    if (same(SYS_DIR "/param.json", param_json, sizeof(param_json) - 1) &&
-        same(SYS_DIR "/icon0.png", shortcut_icon_png, shortcut_icon_png_size))
-        return 0;
-    int err = sceAppInstUtilInitialize();
-    if (err) return -1;
-    int r = -2;
-    if ((mkdir(APP_DIR, 0755) == 0 || errno == EEXIST) &&
-        (mkdir(SYS_DIR, 0755) == 0 || errno == EEXIST) &&
-        write_file(SYS_DIR "/param.json", param_json, sizeof(param_json) - 1) == 0 &&
-        write_file(SYS_DIR "/icon0.png", shortcut_icon_png, shortcut_icon_png_size) == 0) {
-        int (*install_title_dir)(const char *, const char *, void *) = NULL;
-        uint32_t handle;
-        if (!kernel_dynlib_handle(-1, "libSceAppInstUtil.sprx", &handle))
-            install_title_dir = (void *)kernel_dynlib_resolve(-1, handle, "Wudg3Xe3heE");
-        r = install_title_dir && install_title_dir(SHORTCUT_TITLE_ID, "/user/app/", 0) == 0 ? 1 : -3;
+    int changed = 0;
+    if ((mkdir(APP_DIR, 0755) && errno != EEXIST) ||
+        (mkdir(SYS_DIR, 0755) && errno != EEXIST))
+        return -2;
+    if (!same(SYS_DIR "/param.json", param_json, sizeof(param_json) - 1)) {
+        if (write_file(SYS_DIR "/param.json", param_json, sizeof(param_json) - 1)) return -2;
+        changed = 1;
     }
+    if (!same(SYS_DIR "/icon0.png", shortcut_icon_png, shortcut_icon_png_size)) {
+        if (write_file(SYS_DIR "/icon0.png", shortcut_icon_png, shortcut_icon_png_size)) return -2;
+        changed = 1;
+    }
+    /* Register every start: the files alone do not show whether the title is
+     * known to the system, and registering again is harmless. */
+    int err = sceAppInstUtilInitialize();
+    if (err) return err;
+    /* AppInstallTitleDir is exported only by NID (linking it by name makes the
+     * loader refuse the whole payload) and is missing on some firmware; then
+     * AppInstallAll registers every title dir, as OmniPad-CE does. */
+    int (*install_title_dir)(const char *, const char *, void *) = NULL;
+    uint32_t handle;
+    if (kernel_dynlib_handle(-1, "libSceAppInstUtil.sprx", &handle) == 0)
+        install_title_dir = (void *)kernel_dynlib_resolve(-1, handle, "Wudg3Xe3heE");
+    err = install_title_dir ? install_title_dir(SHORTCUT_TITLE_ID, "/user/app/", NULL)
+                            : sceAppInstUtilAppInstallAll(NULL);
     sceAppInstUtilTerminate();
-    return r;
+    return err ? err : changed;
 }

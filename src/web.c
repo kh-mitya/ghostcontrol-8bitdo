@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <strings.h>
+#include <time.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -24,11 +25,11 @@
 
 INCASSET(web_index_html, "assets/index.html");
 
-static int g_listen = -1;
+static int g_listen = -1, g_port;
 static const char *g_presets_dir;
+static struct timespec g_retry_at;
 
-int web_start(int port, const char *presets_dir) {
-    g_presets_dir = presets_dir;
+static int listen_on(int port) {
     int s = socket(AF_INET, SOCK_STREAM, 0);
     if (s < 0) return -1;
     int one = 1;
@@ -42,6 +43,13 @@ int web_start(int port, const char *presets_dir) {
     fcntl(s, F_SETFL, fcntl(s, F_GETFL) | O_NONBLOCK);
     g_listen = s;
     return 0;
+}
+
+int web_start(int port, const char *presets_dir) {
+    g_presets_dir = presets_dir;
+    g_port = port;
+    clock_gettime(CLOCK_MONOTONIC, &g_retry_at);
+    return listen_on(port);
 }
 
 static void send_all(int c, const char *p, size_t n) {
@@ -174,8 +182,18 @@ static void serve(int c) {
 
 void web_poll(int timeout_ms) {
     if (g_listen < 0) {
-        if (timeout_ms > 0) usleep((useconds_t)timeout_ms * 1000);
-        return;
+        /* The port can stay taken for a while after the previous instance
+         * exits: try again every 2 s. */
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        if (g_port && now.tv_sec - g_retry_at.tv_sec >= 2) {
+            g_retry_at = now;
+            if (listen_on(g_port) == 0) gc_web_ready();
+        }
+        if (g_listen < 0) {
+            if (timeout_ms > 0) usleep((useconds_t)timeout_ms * 1000);
+            return;
+        }
     }
     struct pollfd pf = { g_listen, POLLIN, 0 };
     if (poll(&pf, 1, timeout_ms) <= 0) return;
