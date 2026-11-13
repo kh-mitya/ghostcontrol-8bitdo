@@ -39,12 +39,16 @@
 #include "gip_pad.h"
 #include "usb_io.h"
 #include "shellui_bind.h"
+#include "mapper.h"
+#include "web.h"
+#include "shortcut.h"
 
-#define VERSION   "ghostcontrol-8bitdo v0.3"
+#define VERSION   "ghostcontrol-8bitdo v0.4-dev"
 #define DATA_DIR  "/data/ghostpad"
 #define LOG_PATH  DATA_DIR "/ghostcontrol-8bitdo.log"
 #define LOCK_PATH DATA_DIR "/gc_main.pid"   /* same lock as GhostControl 1.x */
 #define STOP_PATH DATA_DIR "/stop"
+#define MAPPING_PATH DATA_DIR "/mapping.ini"
 
 extern int32_t sceUserServiceInitialize(void *params);
 extern int32_t sceUserServiceGetInitialUser(int32_t *user);
@@ -84,10 +88,11 @@ static long now_ms(void) {
     return (long)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
-/* Sleep in short steps; returns 1 once a stop was requested. */
+/* Sleep in short steps, answering the mapping page meanwhile; returns 1 once
+ * a stop was requested. */
 static int wait_or_stop(int ms) {
     for (; ms > 0 && !g_stop; ms -= 250) {
-        usleep(250000);
+        web_poll(250);
         if (ms % 1000 < 250 && access(STOP_PATH, F_OK) == 0) g_stop = 1;
     }
     return g_stop;
@@ -97,10 +102,7 @@ static int wait_or_stop(int ms) {
 #define MAX_SLOTS 4
 #define REPEAT_MS 16       /* GIP reports only changes; the PS5 drops a pad
                             * whose state stops arriving, so repeat it */
-#define COMBO_MS   120
-#define TAP_FRAMES 4
-
-struct combo { int mode; uint32_t first, tap; int tap_frames; long t0; };
+#define WEB_POLL_MS 20   /* how often the mapping page is served while playing */
 
 struct slot {
     int used, fd, out_open, pending, errors;
@@ -112,12 +114,12 @@ struct slot {
     uint8_t buf[64];
     int hs; uint8_t seq;             /* Switch handshake */
     struct gip_state gip;
-    ScePadData state;                /* latest controller state */
+    struct gc_input in;              /* latest controller state */
     int have_state;
     int pad;                         /* virtual pad handle, -1 = none */
     int32_t user;                    /* bound user, -1 = the console asks */
     long last_rx, last_inject, retry_at;
-    struct combo combo;
+    struct gc_combo combo;
 };
 static struct slot g_slots[MAX_SLOTS];
 
@@ -235,32 +237,13 @@ static void pad_delete(struct slot *s) {
     s->pad = -1;
 }
 
-/* ── View + Menu = touchpad click ─────────────────────────────────────────
- * Xbox pads have no key that reaches Capture. A lone View/Menu is held back
- * for COMBO_MS so the chord never leaks Create/Options; a shorter tap is
- * replayed as a short press. */
-static void apply_touch_combo(struct combo *c, ScePadData *pad, long now) {
-    const uint32_t both = SCE_PAD_BUTTON_CREATE | SCE_PAD_BUTTON_OPTIONS;
-    uint32_t b = pad->buttons, held = b & both;
-    switch (c->mode) {
-    case 0: if (held == both) c->mode = 2;                      /* idle */
-            else if (held) { c->mode = 1; c->first = held; c->t0 = now; }
-            break;
-    case 1: if (held == both) c->mode = 2;                      /* one key, waiting */
-            else if (!held) { c->tap = c->first; c->tap_frames = TAP_FRAMES; c->mode = 0; }
-            else if (now - c->t0 >= COMBO_MS) c->mode = 3;
-            break;
-    default: if (!held) c->mode = 0;                            /* 2 chord, 3 single */
-    }
-    if (c->mode == 1) b &= ~both;
-    else if (c->mode == 2) b = (b & ~both) | SCE_PAD_BUTTON_TOUCH_PAD;
-    if (c->mode == 0 && c->tap_frames > 0) { b |= c->tap; c->tap_frames--; }
-    pad->buttons = b;
+static int profile_of(const struct slot *s) {
+    return s->id.kind == GC_KIND_GIP ? GC_PROFILE_WIRED : GC_PROFILE_ADAPTER;
 }
 
 static void inject(struct slot *s, long now) {
-    ScePadData p = s->state;
-    apply_touch_combo(&s->combo, &p, now);
+    ScePadData p;
+    mapper_apply(&g_profiles[profile_of(s)], &s->in, &s->combo, now, &p);
     scePadVirtualDeviceInsertData(s->pad, &p);
     s->last_inject = now;
 }
@@ -344,6 +327,7 @@ static int slot_open(struct slot *s, const char *path) {
         if (open_in(fd, s->eps, 2, id.in_ep, &maxpkt) != 0) { close(fd); return -1; }
     }
     s->fd = fd; s->id = id; s->used = 1;
+    s->in.lx = s->in.ly = s->in.rx = s->in.ry = 128;   /* centred until the first report */
     snprintf(s->path, sizeof(s->path), "%s", path);
     if (maxpkt == 0 || maxpkt > 64 || (id.kind == GC_KIND_SWITCH && maxpkt != 64)) {
         slot_close(s, "unexpected packet size");
@@ -413,7 +397,7 @@ static void scan(void) {
 /* The pad appears with the first button press, so a dialog it may raise
  * always has a live controller to answer it. */
 static void maybe_create_pad(struct slot *s, long now) {
-    if (s->state.buttons == 0 || g_pad_lost || now < s->retry_at) return;
+    if ((!s->in.buttons && s->in.lt < 128 && s->in.rt < 128) || g_pad_lost || now < s->retry_at) return;
     int32_t user = pick_user();
     if (user == -1 && now < g_dialog_until) return;   /* one console dialog at a time */
     if (pad_create(s, user) != 0) { s->retry_at = now_ms() + 10000; return; }
@@ -428,12 +412,10 @@ static void maybe_create_pad(struct slot *s, long now) {
 static void handle_report(struct slot *s, long now) {
     uint32_t len = s->lenv[0];
     if (s->id.kind == GC_KIND_SWITCH) {
-        ScePadData p;
-        memset(&p, 0, sizeof(p));
-        p.quat.w = 1.0f;
-        if (switch_handle_packet(s->fd, s->eps, s->buf, len, &s->hs, &s->seq, &p) <= 0) return;
-        s->state = p;
-    } else if (gip_handle_packet(s->fd, s->eps, s->buf, len, &s->gip, &s->state, now) <= 0) {
+        struct gc_input in = s->in;
+        if (switch_handle_packet(s->fd, s->eps, s->buf, len, &s->hs, &s->seq, &in) <= 0) return;
+        s->in = in;
+    } else if (gip_handle_packet(s->fd, s->eps, s->buf, len, &s->gip, &s->in, now) <= 0) {
         return;
     }
     s->have_state = 1;
@@ -477,6 +459,29 @@ static int slot_poll(struct slot *s, long now) {
     return got;
 }
 
+/* For the mapping page: what is connected and what is pressed right now. */
+size_t gc_status_json(char *buf, size_t size) {
+    size_t n = 0;
+    int w = snprintf(buf, size, "{\"version\":\"" VERSION "\",\"controllers\":[");
+    if (w > 0) n = (size_t)w;
+    for (int i = 0, first = 1; i < MAX_SLOTS && n < size; i++) {
+        const struct slot *s = &g_slots[i];
+        if (!s->used) continue;
+        w = snprintf(buf + n, size - n,
+                     "%s{\"slot\":%d,\"profile\":%d,\"vid\":\"%04x\",\"pid\":\"%04x\","
+                     "\"pad\":%d,\"buttons\":%u,\"lt\":%u,\"rt\":%u}",
+                     first ? "" : ",", i + 1, profile_of(s), s->id.vid, s->id.pid,
+                     s->pad >= 0, (unsigned)s->in.buttons, s->in.lt, s->in.rt);
+        if (w > 0) n += (size_t)w;
+        first = 0;
+    }
+    if (n < size) {
+        w = snprintf(buf + n, size - n, "]}");
+        if (w > 0) n += (size_t)w;
+    }
+    return n < size ? n : size - 1;
+}
+
 int main(void) {
     mkdir(DATA_DIR, 0755);
     int lock = open(LOCK_PATH, O_RDWR | O_CREAT, 0600);
@@ -496,6 +501,7 @@ int main(void) {
     unlink(STOP_PATH);
     signal(SIGTERM, on_term);
     signal(SIGINT, on_term);
+    signal(SIGPIPE, SIG_IGN);              /* a browser may hang up mid-answer */
     char pid[16];
     int n = snprintf(pid, sizeof(pid), "%d", (int)getpid());
     if (ftruncate(lock, 0) == 0) pwrite(lock, pid, (size_t)n, 0);
@@ -511,10 +517,16 @@ int main(void) {
     sceUserServiceInitialize(NULL);
     int r1 = scePadInit(), r2 = scePadSetProcessPrivilege(1);
     if (r1 || r2) gc_log("scePadInit 0x%08x, privilege 0x%08x", (unsigned)r1, (unsigned)r2);
+    int bad = mapper_load(MAPPING_PATH);
+    if (bad) gc_log("%s: error on line %d, using the default mapping", MAPPING_PATH, bad);
+    if (web_start(WEB_PORT, MAPPING_PATH) != 0)
+        gc_log("mapping page unavailable: port %d (errno %d)", WEB_PORT, errno);
+    int sc = shortcut_install();
+    if (sc) gc_log(sc > 0 ? "home-screen shortcut installed" : "home-screen shortcut failed (%d)", sc);
     notify(VERSION " started");
 
     for (int i = 0; i < MAX_SLOTS; i++) { g_slots[i].fd = -1; g_slots[i].pad = -1; }
-    long last_scan = now_ms() - 2000, last_stop_check = 0;
+    long last_scan = now_ms() - 2000, last_stop_check = 0, last_web = 0;
     while (!g_stop) {
         long now = now_ms();
         int active = 0;
@@ -530,6 +542,10 @@ int main(void) {
         int got = 0;
         for (int i = 0; i < MAX_SLOTS && !g_stop; i++)
             if (g_slots[i].used) got |= slot_poll(&g_slots[i], now_ms());
+        if (now - last_web >= WEB_POLL_MS) {
+            last_web = now;
+            web_poll(0);
+        }
         if (now - last_stop_check >= 1000) {
             last_stop_check = now;
             if (access(STOP_PATH, F_OK) == 0) g_stop = 1;

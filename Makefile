@@ -16,14 +16,14 @@ endif
 include $(PS5_PAYLOAD_SDK)/toolchain/prospero.mk
 
 CFLAGS  += -D__PROSPERO__ -Wall -Wextra -O2 -fPIC -fno-stack-protector
-LDFLAGS += -lScePad -lSceUserService
+LDFLAGS += -lScePad -lSceUserService -lSceAppInstUtil
 
-SRC := $(addprefix src/,main.c switch_pad.c gip_pad.c usb_guard.c shellui_bind.c)
+SRC := $(addprefix src/,main.c switch_pad.c gip_pad.c usb_guard.c shellui_bind.c mapper.c web.c shortcut.c)
 
 .PHONY: all clean send
 all: $(TARGET)
 
-$(TARGET): $(SRC) $(wildcard src/*.h)
+$(TARGET): $(SRC) $(wildcard src/*.h) assets/index.html assets/icon0.png
 	$(CC) $(CFLAGS) -o $@ $(SRC) $(LDFLAGS)
 
 send: $(TARGET)

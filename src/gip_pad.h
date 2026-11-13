@@ -3,7 +3,7 @@
 #include <stdint.h>
 #include <dev/usb/usb.h>
 #include <dev/usb/usb_ioctl.h>
-#include "gc_types.h"
+#include "input.h"
 
 /* Xbox One / Series controllers over USB (GIP), as Linux xpad drives them.
  * eps[0] = IN, eps[1] = OUT. The pad reports only when something changes,
@@ -18,4 +18,4 @@ struct gip_state {
 void gip_start(int fd, struct usb_fs_endpoint *eps, struct gip_state *g, long now);
 /* 1: *state was updated; 0: protocol traffic */
 int gip_handle_packet(int fd, struct usb_fs_endpoint *eps, const uint8_t *buf,
-                      uint32_t len, struct gip_state *g, ScePadData *state, long now);
+                      uint32_t len, struct gip_state *g, struct gc_input *state, long now);

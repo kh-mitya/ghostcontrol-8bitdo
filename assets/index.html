@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GhostControl 8BitDo — button mapper</title>
+<style>
+  :root { --bg:#0e1626; --card:#16223a; --line:#24345a; --fg:#e8eef8; --dim:#8fa3c4; --acc:#3fa7d6; --hot:#f5b700; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.4 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  header { padding:18px 24px; border-bottom:1px solid var(--line); display:flex; gap:16px; align-items:baseline; flex-wrap:wrap; }
+  header h1 { margin:0; font-size:22px; }
+  header small { color:var(--dim); }
+  main { max-width:980px; margin:0 auto; padding:20px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin-bottom:18px; }
+  .card h2 { margin:0 0 12px; font-size:17px; }
+  .tabs { display:flex; gap:8px; margin-bottom:14px; }
+  .tabs button { flex:1; }
+  button { background:#22325a; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:10px 16px; font-size:16px; cursor:pointer; }
+  button.on, button.primary { background:var(--acc); border-color:var(--acc); color:#06111f; font-weight:600; }
+  table { width:100%; border-collapse:collapse; }
+  td { padding:6px 8px; border-top:1px solid var(--line); }
+  td:first-child { width:45%; }
+  tr.hot td { background:rgba(245,183,0,.18); }
+  tr.hot td:first-child { color:var(--hot); font-weight:600; }
+  select, input[type=range] { width:100%; font-size:16px; }
+  select { background:#0f1a2e; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:6px; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:10px 24px; }
+  label { display:flex; align-items:center; gap:10px; }
+  .range label { justify-content:space-between; }
+  .pads span { display:inline-block; margin:0 8px 6px 0; padding:4px 10px; border-radius:20px; background:#22325a; }
+  .actions { display:flex; gap:10px; flex-wrap:wrap; }
+  #msg { margin-left:auto; align-self:center; color:var(--dim); }
+  .hint { color:var(--dim); font-size:14px; margin:8px 0 0; }
+</style>
+</head>
+<body>
+<header>
+  <h1>GhostControl 8BitDo</h1>
+  <small id="ver">button mapper</small>
+</header>
+<main>
+  <div class="card">
+    <h2>Connected controllers</h2>
+    <div class="pads" id="pads">—</div>
+    <p class="hint">Press a button on a controller: its row lights up in that controller's profile.</p>
+  </div>
+
+  <div class="card">
+    <div class="tabs">
+      <button id="tab0" class="on" onclick="show(0)">8BitDo adapter</button>
+      <button id="tab1" onclick="show(1)">Wired Xbox</button>
+    </div>
+    <table><tbody id="rows"></tbody></table>
+  </div>
+
+  <div class="card">
+    <h2>Sticks and triggers</h2>
+    <div class="grid" id="opts"></div>
+  </div>
+
+  <div class="card actions">
+    <button class="primary" onclick="save()">Save</button>
+    <button onclick="resetProfile()">Defaults for this profile</button>
+    <button onclick="copyProfile()">Copy to the other profile</button>
+    <span id="msg"></span>
+  </div>
+</main>
+<script>
+var IN = [["a","A"],["b","B"],["x","X"],["y","Y"],["lb","LB"],["rb","RB"],["lt","LT"],["rt","RT"],
+  ["ls","Left stick click"],["rs","Right stick click"],["view","View"],["menu","Menu"],["xbox","Xbox button"],
+  ["share","Share / Capture"],["up","D-pad up"],["down","D-pad down"],["left","D-pad left"],["right","D-pad right"]];
+var OUT = [["none","— nothing —"],["cross","Cross"],["circle","Circle"],["square","Square"],["triangle","Triangle"],
+  ["l1","L1"],["r1","R1"],["l2","L2"],["r2","R2"],["l3","L3"],["r3","R3"],["create","Create"],["options","Options"],
+  ["ps","PS"],["touchpad","Touchpad click"],["up","D-pad up"],["down","D-pad down"],["left","D-pad left"],["right","D-pad right"]];
+var CHECKS = [["touch_combo","View + Menu together = touchpad"],["swap_sticks","Swap left and right stick"],
+  ["invert_left_x","Invert left stick X"],["invert_left_y","Invert left stick Y"],
+  ["invert_right_x","Invert right stick X"],["invert_right_y","Invert right stick Y"]];
+var RANGES = [["deadzone_left","Left stick dead zone",0,50,"%"],["deadzone_right","Right stick dead zone",0,50,"%"],
+  ["trigger_threshold","LT / RT press point",1,99,"%"]];
+var NAMES = ["adapter","wired"], prof = [{},{}], cur = 0;
+
+function parse(text) {
+  var p = [{},{}], s = -1;
+  text.split("\n").forEach(function (l) {
+    l = l.replace(/[#;].*/, "").trim();
+    if (!l) return;
+    var m = l.match(/^\[(\w+)\]$/);
+    if (m) { s = NAMES.indexOf(m[1]); return; }
+    var kv = l.split("=");
+    if (s >= 0 && kv.length == 2) p[s][kv[0].trim()] = kv[1].trim();
+  });
+  return p;
+}
+function format() {
+  var t = "# ghostcontrol-8bitdo mapping: Xbox input = DualSense button\n";
+  for (var i = 0; i < 2; i++) {
+    t += "\n[" + NAMES[i] + "]\n";
+    for (var k in prof[i]) t += k + " = " + prof[i][k] + "\n";
+  }
+  return t;
+}
+function el(tag, html) { var e = document.createElement(tag); if (html) e.innerHTML = html; return e; }
+function render() {
+  var p = prof[cur], rows = document.getElementById("rows"), opts = document.getElementById("opts");
+  rows.innerHTML = ""; opts.innerHTML = "";
+  IN.forEach(function (it) {
+    var tr = el("tr"); tr.id = "row_" + it[0];
+    tr.appendChild(el("td", it[1]));
+    var sel = el("select");
+    OUT.forEach(function (o) { var op = el("option", o[1]); op.value = o[0]; sel.appendChild(op); });
+    sel.value = p[it[0]] || "none";
+    sel.onchange = function () { p[it[0]] = sel.value; dirty(); };
+    var td = el("td"); td.appendChild(sel); tr.appendChild(td); rows.appendChild(tr);
+  });
+  CHECKS.forEach(function (c) {
+    var lab = el("label"), cb = el("input"); cb.type = "checkbox"; cb.checked = p[c[0]] == "1";
+    cb.onchange = function () { p[c[0]] = cb.checked ? "1" : "0"; dirty(); };
+    lab.appendChild(cb); lab.appendChild(document.createTextNode(c[1])); opts.appendChild(lab);
+  });
+  RANGES.forEach(function (r) {
+    var box = el("div"); box.className = "range";
+    var lab = el("label", "<span>" + r[1] + "</span><b>" + p[r[0]] + r[4] + "</b>");
+    var rg = el("input"); rg.type = "range"; rg.min = r[2]; rg.max = r[3]; rg.value = p[r[0]];
+    rg.oninput = function () { p[r[0]] = rg.value; lab.lastChild.textContent = rg.value + r[4]; dirty(); };
+    box.appendChild(lab); box.appendChild(rg); opts.appendChild(box);
+  });
+}
+function show(i) {
+  cur = i;
+  document.getElementById("tab0").className = i == 0 ? "on" : "";
+  document.getElementById("tab1").className = i == 1 ? "on" : "";
+  render();
+}
+function msg(t) { document.getElementById("msg").textContent = t; }
+function dirty() { msg("Unsaved changes"); }
+function load() {
+  fetch("/mapping").then(function (r) { return r.text(); }).then(function (t) { prof = parse(t); render(); msg(""); });
+}
+function save() {
+  fetch("/mapping", { method: "POST", body: format() })
+    .then(function (r) { return r.text().then(function (t) { msg(r.ok ? "Saved: active now" : "Not saved: " + t); }); })
+    .catch(function () { msg("Console not reachable"); });
+}
+function resetProfile() {
+  fetch("/mapping/default").then(function (r) { return r.text(); }).then(function (t) {
+    prof[cur] = parse(t)[cur]; render(); dirty();
+  });
+}
+function copyProfile() {
+  prof[1 - cur] = JSON.parse(JSON.stringify(prof[cur]));
+  dirty(); msg("Copied to " + (cur ? "8BitDo adapter" : "Wired Xbox") + " — save to apply");
+}
+function poll() {
+  fetch("/status").then(function (r) { return r.json(); }).then(function (s) {
+    document.getElementById("ver").textContent = s.version + " · button mapper";
+    var pads = document.getElementById("pads"), hot = {};
+    pads.innerHTML = s.controllers.length ? "" : "No controller connected";
+    s.controllers.forEach(function (c) {
+      pads.appendChild(el("span", c.slot + ": " + (c.profile ? "Wired Xbox" : "8BitDo adapter") +
+        (c.pad ? "" : " (press a button)")));
+      if (c.profile == cur) IN.forEach(function (it, i) {
+        if (c.buttons & (1 << i) || (it[0] == "lt" && c.lt > 20) || (it[0] == "rt" && c.rt > 20)) hot[it[0]] = 1;
+      });
+    });
+    IN.forEach(function (it) { var r = document.getElementById("row_" + it[0]); if (r) r.className = hot[it[0]] ? "hot" : ""; });
+  }).catch(function () {}).then(function () { setTimeout(poll, document.hidden ? 2000 : 250); });
+}
+load(); poll();
+</script>
+</body>
+</html>

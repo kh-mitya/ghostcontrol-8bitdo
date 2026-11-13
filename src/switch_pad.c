@@ -26,72 +26,59 @@ static uint8_t stick(uint16_t v) { if (v > 4095) v = 4095; return (uint8_t)((v *
 /* Switch reports stick up as high values; PlayStation expects up = 0. */
 static uint8_t stick_y(uint16_t v) { return (uint8_t)(255u - stick(v)); }
 
+/* Buttons by position, in Xbox terms: Switch B (bottom) is Xbox A, and so on.
+ * right: [3] in full reports, [1] in simple; shared: [4] / [2]; left: [5] / [8] */
+static uint32_t buttons(uint8_t br, uint8_t bs, uint8_t bl) {
+    uint32_t b = 0;
+    if (br & 0x04) b |= GI_BIT(GI_A);
+    if (br & 0x08) b |= GI_BIT(GI_B);
+    if (br & 0x01) b |= GI_BIT(GI_X);
+    if (br & 0x02) b |= GI_BIT(GI_Y);
+    if (br & 0x40) b |= GI_BIT(GI_RB);
+    if (bl & 0x40) b |= GI_BIT(GI_LB);
+    if (bs & 0x01) b |= GI_BIT(GI_VIEW);     /* − */
+    if (bs & 0x02) b |= GI_BIT(GI_MENU);     /* + */
+    if (bs & 0x04) b |= GI_BIT(GI_RS);
+    if (bs & 0x08) b |= GI_BIT(GI_LS);
+    if (bs & 0x10) b |= GI_BIT(GI_XBOX);     /* Home */
+    if (bs & 0x20) b |= GI_BIT(GI_SHARE);    /* Capture */
+    return b;
+}
+
 /* Full report: [3] right buttons, [4] shared, [5] left buttons, [6..11] sticks */
-static void parse_full(const uint8_t *b, ScePadData *o) {
+static void parse_full(const uint8_t *b, struct gc_input *o) {
     uint8_t br = b[3], bs = b[4], bl = b[5];
-    uint32_t btn = 0;
-    if (br & 0x04) btn |= SCE_PAD_BUTTON_CROSS;
-    if (br & 0x08) btn |= SCE_PAD_BUTTON_CIRCLE;
-    if (br & 0x01) btn |= SCE_PAD_BUTTON_SQUARE;
-    if (br & 0x02) btn |= SCE_PAD_BUTTON_TRIANGLE;
-    if (br & 0x40) btn |= SCE_PAD_BUTTON_R1;
-    if (br & 0x80) btn |= SCE_PAD_BUTTON_R2;
-    if (bl & 0x40) btn |= SCE_PAD_BUTTON_L1;
-    if (bl & 0x80) btn |= SCE_PAD_BUTTON_L2;
-    if (bl & 0x02) btn |= SCE_PAD_BUTTON_UP;
-    if (bl & 0x01) btn |= SCE_PAD_BUTTON_DOWN;
-    if (bl & 0x04) btn |= SCE_PAD_BUTTON_RIGHT;
-    if (bl & 0x08) btn |= SCE_PAD_BUTTON_LEFT;
-    if (bs & 0x01) btn |= SCE_PAD_BUTTON_CREATE;     /* −      (View)  */
-    if (bs & 0x02) btn |= SCE_PAD_BUTTON_OPTIONS;    /* +      (Menu)  */
-    if (bs & 0x04) btn |= SCE_PAD_BUTTON_R3;
-    if (bs & 0x08) btn |= SCE_PAD_BUTTON_L3;
-    if (bs & 0x10) btn |= SCE_PAD_BUTTON_PS;         /* Home   (Xbox)  */
-    if (bs & 0x20) btn |= SCE_PAD_BUTTON_TOUCH_PAD;  /* Capture        */
+    uint32_t btn = buttons(br, bs, bl);
+    if (bl & 0x02) btn |= GI_BIT(GI_UP);
+    if (bl & 0x01) btn |= GI_BIT(GI_DOWN);
+    if (bl & 0x04) btn |= GI_BIT(GI_RIGHT);
+    if (bl & 0x08) btn |= GI_BIT(GI_LEFT);
     o->buttons = btn;
-    o->leftStick.x  = stick((uint16_t)(b[6] | ((b[7] & 0xF) << 8)));
-    o->leftStick.y  = stick_y((uint16_t)((b[7] >> 4) | ((uint16_t)b[8] << 4)));
-    o->rightStick.x = stick((uint16_t)(b[9] | ((b[10] & 0xF) << 8)));
-    o->rightStick.y = stick_y((uint16_t)((b[10] >> 4) | ((uint16_t)b[11] << 4)));
-    o->analogButtons.l2 = (bl & 0x80) ? 255 : 0;
-    o->analogButtons.r2 = (br & 0x80) ? 255 : 0;
-    o->connected = 1; o->quat.w = 1.0f;
+    o->lx = stick((uint16_t)(b[6] | ((b[7] & 0xF) << 8)));
+    o->ly = stick_y((uint16_t)((b[7] >> 4) | ((uint16_t)b[8] << 4)));
+    o->rx = stick((uint16_t)(b[9] | ((b[10] & 0xF) << 8)));
+    o->ry = stick_y((uint16_t)((b[10] >> 4) | ((uint16_t)b[11] << 4)));
+    o->lt = (bl & 0x80) ? 255 : 0;           /* ZL/ZR are on/off */
+    o->rt = (br & 0x80) ? 255 : 0;
 }
 
 /* Simple report, sent until the handshake switches the pad to full reports:
  * [1] right buttons, [2] shared, [3] hat, [4..7] sticks (8 bit), [8] L/ZL */
-static void parse_simple(const uint8_t *b, ScePadData *o) {
+static void parse_simple(const uint8_t *b, struct gc_input *o) {
     static const uint32_t hat[8] = {
-        SCE_PAD_BUTTON_UP, SCE_PAD_BUTTON_UP | SCE_PAD_BUTTON_RIGHT,
-        SCE_PAD_BUTTON_RIGHT, SCE_PAD_BUTTON_DOWN | SCE_PAD_BUTTON_RIGHT,
-        SCE_PAD_BUTTON_DOWN, SCE_PAD_BUTTON_DOWN | SCE_PAD_BUTTON_LEFT,
-        SCE_PAD_BUTTON_LEFT, SCE_PAD_BUTTON_UP | SCE_PAD_BUTTON_LEFT };
+        GI_BIT(GI_UP), GI_BIT(GI_UP) | GI_BIT(GI_RIGHT), GI_BIT(GI_RIGHT),
+        GI_BIT(GI_DOWN) | GI_BIT(GI_RIGHT), GI_BIT(GI_DOWN), GI_BIT(GI_DOWN) | GI_BIT(GI_LEFT),
+        GI_BIT(GI_LEFT), GI_BIT(GI_UP) | GI_BIT(GI_LEFT) };
     uint8_t br = b[1], bs = b[2], bl = b[8];
-    uint32_t btn = b[3] < 8 ? hat[b[3]] : 0;
-    if (br & 0x04) btn |= SCE_PAD_BUTTON_CROSS;
-    if (br & 0x08) btn |= SCE_PAD_BUTTON_CIRCLE;
-    if (br & 0x01) btn |= SCE_PAD_BUTTON_SQUARE;
-    if (br & 0x02) btn |= SCE_PAD_BUTTON_TRIANGLE;
-    if (br & 0x40) btn |= SCE_PAD_BUTTON_R1;
-    if (br & 0x80) btn |= SCE_PAD_BUTTON_R2;
-    if (bl & 0x40) btn |= SCE_PAD_BUTTON_L1;
-    if (bl & 0x80) btn |= SCE_PAD_BUTTON_L2;
-    if (bs & 0x01) btn |= SCE_PAD_BUTTON_CREATE;
-    if (bs & 0x02) btn |= SCE_PAD_BUTTON_OPTIONS;
-    if (bs & 0x04) btn |= SCE_PAD_BUTTON_R3;
-    if (bs & 0x08) btn |= SCE_PAD_BUTTON_L3;
-    if (bs & 0x10) btn |= SCE_PAD_BUTTON_PS;
-    if (bs & 0x20) btn |= SCE_PAD_BUTTON_TOUCH_PAD;
-    o->buttons = btn;
-    o->leftStick.x  = b[4]; o->leftStick.y  = (uint8_t)(255u - b[5]);
-    o->rightStick.x = b[6]; o->rightStick.y = (uint8_t)(255u - b[7]);
-    o->analogButtons.l2 = (bl & 0x80) ? 255 : 0;
-    o->analogButtons.r2 = (br & 0x80) ? 255 : 0;
-    o->connected = 1; o->quat.w = 1.0f;
+    o->buttons = buttons(br, bs, bl) | (b[3] < 8 ? hat[b[3]] : 0);
+    o->lx = b[4]; o->ly = (uint8_t)(255u - b[5]);
+    o->rx = b[6]; o->ry = (uint8_t)(255u - b[7]);
+    o->lt = (bl & 0x80) ? 255 : 0;
+    o->rt = (br & 0x80) ? 255 : 0;
 }
 
 int switch_handle_packet(int fd, struct usb_fs_endpoint *eps, const uint8_t *buf,
-                         uint32_t len, int *hs, uint8_t *seq, ScePadData *out) {
+                         uint32_t len, int *hs, uint8_t *seq, struct gc_input *out) {
     if (len == 0) return 0;
     switch (buf[0]) {
     case 0x30: case 0x00:                      /* full input report */

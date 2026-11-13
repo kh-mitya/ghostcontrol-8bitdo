@@ -44,42 +44,38 @@ static uint8_t trigger(const uint8_t *p) {
     return (uint8_t)(v * 255u / 1023u);
 }
 
-static void parse_input(const uint8_t *b, uint32_t len, const struct gip_state *g, ScePadData *o) {
+static void parse_input(const uint8_t *b, uint32_t len, const struct gip_state *g, struct gc_input *o) {
     uint8_t b4 = b[4], b5 = b[5];
     uint32_t btn = 0;
-    if (b4 & 0x04) btn |= SCE_PAD_BUTTON_OPTIONS;   /* Menu */
-    if (b4 & 0x08) btn |= SCE_PAD_BUTTON_CREATE;    /* View */
-    if (b4 & 0x10) btn |= SCE_PAD_BUTTON_CROSS;     /* A */
-    if (b4 & 0x20) btn |= SCE_PAD_BUTTON_CIRCLE;    /* B */
-    if (b4 & 0x40) btn |= SCE_PAD_BUTTON_SQUARE;    /* X */
-    if (b4 & 0x80) btn |= SCE_PAD_BUTTON_TRIANGLE;  /* Y */
-    if (b5 & 0x01) btn |= SCE_PAD_BUTTON_UP;
-    if (b5 & 0x02) btn |= SCE_PAD_BUTTON_DOWN;
-    if (b5 & 0x04) btn |= SCE_PAD_BUTTON_LEFT;
-    if (b5 & 0x08) btn |= SCE_PAD_BUTTON_RIGHT;
-    if (b5 & 0x10) btn |= SCE_PAD_BUTTON_L1;
-    if (b5 & 0x20) btn |= SCE_PAD_BUTTON_R1;
-    if (b5 & 0x40) btn |= SCE_PAD_BUTTON_L3;
-    if (b5 & 0x80) btn |= SCE_PAD_BUTTON_R3;
-    o->analogButtons.l2 = trigger(b + 6);
-    o->analogButtons.r2 = trigger(b + 8);
-    if (o->analogButtons.l2 > 16) btn |= SCE_PAD_BUTTON_L2;
-    if (o->analogButtons.r2 > 16) btn |= SCE_PAD_BUTTON_R2;
-    /* Series X|S Share button (xpad: data[len - 26] bit 0) → touchpad */
+    if (b4 & 0x04) btn |= GI_BIT(GI_MENU);
+    if (b4 & 0x08) btn |= GI_BIT(GI_VIEW);
+    if (b4 & 0x10) btn |= GI_BIT(GI_A);
+    if (b4 & 0x20) btn |= GI_BIT(GI_B);
+    if (b4 & 0x40) btn |= GI_BIT(GI_X);
+    if (b4 & 0x80) btn |= GI_BIT(GI_Y);
+    if (b5 & 0x01) btn |= GI_BIT(GI_UP);
+    if (b5 & 0x02) btn |= GI_BIT(GI_DOWN);
+    if (b5 & 0x04) btn |= GI_BIT(GI_LEFT);
+    if (b5 & 0x08) btn |= GI_BIT(GI_RIGHT);
+    if (b5 & 0x10) btn |= GI_BIT(GI_LB);
+    if (b5 & 0x20) btn |= GI_BIT(GI_RB);
+    if (b5 & 0x40) btn |= GI_BIT(GI_LS);
+    if (b5 & 0x80) btn |= GI_BIT(GI_RS);
+    /* Series X|S Share button (xpad: data[len - 26] bit 0) */
     if (g->vid == 0x045e && g->pid == 0x0b12 && len >= 44 && (b[len - 26] & 0x01))
-        btn |= SCE_PAD_BUTTON_TOUCH_PAD;
-    if (g->guide) btn |= SCE_PAD_BUTTON_PS;
+        btn |= GI_BIT(GI_SHARE);
+    if (g->guide) btn |= GI_BIT(GI_XBOX);
     o->buttons = btn;
-    o->leftStick.x  = axis(b + 10);
-    o->leftStick.y  = (uint8_t)(255u - axis(b + 12));   /* GIP: up is positive */
-    o->rightStick.x = axis(b + 14);
-    o->rightStick.y = (uint8_t)(255u - axis(b + 16));
-    o->connected = 1;
-    o->quat.w = 1.0f;
+    o->lt = trigger(b + 6);
+    o->rt = trigger(b + 8);
+    o->lx = axis(b + 10);
+    o->ly = (uint8_t)(255u - axis(b + 12));   /* GIP: up is positive */
+    o->rx = axis(b + 14);
+    o->ry = (uint8_t)(255u - axis(b + 16));
 }
 
 int gip_handle_packet(int fd, struct usb_fs_endpoint *eps, const uint8_t *buf,
-                      uint32_t len, struct gip_state *g, ScePadData *state, long now) {
+                      uint32_t len, struct gip_state *g, struct gc_input *state, long now) {
     if (len < 4) return 0;
     switch (buf[0]) {
     case GIP_CMD_INPUT:
@@ -95,12 +91,7 @@ int gip_handle_packet(int fd, struct usb_fs_endpoint *eps, const uint8_t *buf,
             usb_send(fd, eps, ack, sizeof(ack));
         }
         g->guide = (buf[4] & 0x03) && now >= g->guide_armed;
-        state->buttons = (state->buttons & ~SCE_PAD_BUTTON_PS) | (g->guide ? SCE_PAD_BUTTON_PS : 0);
-        if (!state->connected) {               /* Guide before any input report */
-            state->leftStick.x = state->leftStick.y = 128;
-            state->rightStick.x = state->rightStick.y = 128;
-            state->connected = 1; state->quat.w = 1.0f;
-        }
+        state->buttons = (state->buttons & ~GI_BIT(GI_XBOX)) | (g->guide ? GI_BIT(GI_XBOX) : 0);
         return 1;
     case GIP_CMD_ANNOUNCE:                     /* pad reset itself: power it on again */
         gip_start(fd, eps, g, now);
