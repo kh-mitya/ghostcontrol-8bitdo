@@ -84,6 +84,8 @@ it works in menus, games and the user picker like a real one.
 
 Stick Y is converted to PlayStation orientation for both protocols, so you don't need an inverted-axis profile in 8BitDo Ultimate Software.
 
+You can remap buttons with the adapter's own profile in **8BitDo Ultimate Software**. The payload passes on whatever the adapter sends, so the table above shows the default layout. Edit the profile for **Switch mode** (each mode has its own), and do not turn on stick Y inversion in it: the payload already converts the axis, so it would end up upside down.
+
 ## Installation
 
 You need a jailbroken PS5 with a payload loader. Developed and tested on a **PS5 Slim, FW 12.60, kstuff-lite, Payload Manager 0.6.3**.
@@ -104,7 +106,7 @@ The payload keeps running until the console reboots. Add it to your loader's aut
 2. Put the adapter in **Switch mode: hold View + LB for 3 seconds.**
 3. *"controller 1 (8BitDo (Switch mode)) found, press any button"* → press a button → *"controller 1 ready"*.
 
-Keep the 8BitDo profile (LB + RB + L3 + R3) **off**.
+Your 8BitDo profile (toggled with LB + RB + L3 + R3) works as usual; see [Button mapping](#button-mapping) about stick inversion.
 
 ### Wired Xbox pad
 
