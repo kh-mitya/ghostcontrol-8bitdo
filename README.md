@@ -128,10 +128,10 @@ From a phone or a computer on the same network: `http://<ps5-ip>:8096/`.
 
 You need a jailbroken PS5 with a payload loader. Developed and tested on a **PS5 Slim, FW 12.60, kstuff-lite, Payload Manager 0.6.3**.
 
-1. Download `ghostcontrol-8bitdo.elf` from [Releases](../../releases).
+1. Download `GC_v0.4_8bitdo.elf` from [Releases](../../releases). Keep the file name: Payload Manager reads it and shows the payload as **GC 8bitdo**, version **v0.4**.
 2. Load it like any other payload:
    - **Payload Manager:** upload the ELF on its web page (port 8084) and start it from the list;
-   - **ELF loader** (port 9021): `nc -q0 <ps5-ip> 9021 < ghostcontrol-8bitdo.elf`.
+   - **ELF loader** (port 9021): `nc -q0 <ps5-ip> 9021 < GC_v0.4_8bitdo.elf`.
 3. The notification *"ghostcontrol-8bitdo v0.4 started"* appears, and on the first start a *GhostControl 8BitDo* tile appears in **Media**.
 
 The payload keeps running until the console reboots. Add it to your loader's autoload if you want it on every boot.
