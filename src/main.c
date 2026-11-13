@@ -49,6 +49,7 @@
 #define LOCK_PATH DATA_DIR "/gc_main.pid"   /* same lock as GhostControl 1.x */
 #define STOP_PATH DATA_DIR "/stop"
 #define MAPPING_PATH DATA_DIR "/mapping.ini"
+#define PRESETS_DIR  DATA_DIR "/presets"
 
 extern int32_t sceUserServiceInitialize(void *params);
 extern int32_t sceUserServiceGetInitialUser(int32_t *user);
@@ -237,13 +238,9 @@ static void pad_delete(struct slot *s) {
     s->pad = -1;
 }
 
-static int profile_of(const struct slot *s) {
-    return s->id.kind == GC_KIND_GIP ? GC_PROFILE_WIRED : GC_PROFILE_ADAPTER;
-}
-
 static void inject(struct slot *s, long now) {
     ScePadData p;
-    mapper_apply(&g_profiles[profile_of(s)], &s->in, &s->combo, now, &p);
+    mapper_apply(&g_profile, &s->in, &s->combo, now, &p);
     scePadVirtualDeviceInsertData(s->pad, &p);
     s->last_inject = now;
 }
@@ -468,9 +465,9 @@ size_t gc_status_json(char *buf, size_t size) {
         const struct slot *s = &g_slots[i];
         if (!s->used) continue;
         w = snprintf(buf + n, size - n,
-                     "%s{\"slot\":%d,\"profile\":%d,\"vid\":\"%04x\",\"pid\":\"%04x\","
+                     "%s{\"slot\":%d,\"analog\":%d,\"vid\":\"%04x\",\"pid\":\"%04x\","
                      "\"pad\":%d,\"buttons\":%u,\"lt\":%u,\"rt\":%u}",
-                     first ? "" : ",", i + 1, profile_of(s), s->id.vid, s->id.pid,
+                     first ? "" : ",", i + 1, s->id.kind == GC_KIND_GIP, s->id.vid, s->id.pid,
                      s->pad >= 0, (unsigned)s->in.buttons, s->in.lt, s->in.rt);
         if (w > 0) n += (size_t)w;
         first = 0;
@@ -519,7 +516,7 @@ int main(void) {
     if (r1 || r2) gc_log("scePadInit 0x%08x, privilege 0x%08x", (unsigned)r1, (unsigned)r2);
     int bad = mapper_load(MAPPING_PATH);
     if (bad) gc_log("%s: error on line %d, using the default mapping", MAPPING_PATH, bad);
-    if (web_start(WEB_PORT, MAPPING_PATH) != 0)
+    if (web_start(WEB_PORT, MAPPING_PATH, PRESETS_DIR) != 0)
         gc_log("mapping page unavailable: port %d (errno %d)", WEB_PORT, errno);
     int sc = shortcut_install();
     if (sc) gc_log(sc > 0 ? "home-screen shortcut installed" : "home-screen shortcut failed (%d)", sc);

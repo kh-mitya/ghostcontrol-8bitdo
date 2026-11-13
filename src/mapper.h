@@ -12,9 +12,11 @@ enum gc_out {
     GO_LEFT, GO_RIGHT, GO_COUNT
 };
 
-enum { GC_PROFILE_ADAPTER, GC_PROFILE_WIRED, GC_PROFILE_COUNT };
+#define PRESET_NAME_MAX 40
 
+/* One mapping for every controller, whatever its connection. */
 struct gc_profile {
+    char preset[PRESET_NAME_MAX + 1];   /* preset it came from, "" = custom */
     uint8_t map[GI_COUNT];      /* enum gc_out per input */
     uint8_t touch_combo;        /* View + Menu together = touchpad */
     uint8_t swap_sticks;
@@ -26,16 +28,20 @@ struct gc_profile {
 /* View + Menu chord detector, one per controller. */
 struct gc_combo { int mode; uint32_t first, tap; int tap_frames; long t0; };
 
-extern struct gc_profile g_profiles[GC_PROFILE_COUNT];
+extern struct gc_profile g_profile;
 
-void mapper_defaults(struct gc_profile p[GC_PROFILE_COUNT]);
+void mapper_defaults(struct gc_profile *p);
 /* Turn controller state into DualSense input. */
 void mapper_apply(const struct gc_profile *p, const struct gc_input *in,
                   struct gc_combo *combo, long now_ms, ScePadData *out);
-/* Text form (the mapping file). parse: 0 ok, else the failing line number;
- * profiles are only changed on success. */
-size_t mapper_format(const struct gc_profile p[GC_PROFILE_COUNT], char *buf, size_t size);
-int mapper_parse(const char *text, struct gc_profile p[GC_PROFILE_COUNT]);
-/* Load from / save to MAPPING_PATH. load: defaults when there is no file. */
+/* Text form (mapping file and presets). parse: 0 ok, else the failing line
+ * number; *p is only changed on success. */
+size_t mapper_format(const struct gc_profile *p, char *buf, size_t size);
+int mapper_parse(const char *text, struct gc_profile *p);
+int mapper_valid_name(const char *name);
+/* The active mapping: defaults when there is no file. */
 int mapper_load(const char *path);
 int mapper_save(const char *path);
+/* Raw text file helpers (presets). */
+int mapper_read_file(const char *path, char *buf, size_t size);
+int mapper_write_file(const char *path, const char *data, size_t len);

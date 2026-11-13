@@ -14,8 +14,6 @@
   main { max-width:980px; margin:0 auto; padding:20px; }
   .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:16px 18px; margin-bottom:18px; }
   .card h2 { margin:0 0 12px; font-size:17px; }
-  .tabs { display:flex; gap:8px; margin-bottom:14px; }
-  .tabs button { flex:1; }
   button { background:#22325a; color:var(--fg); border:1px solid var(--line); border-radius:8px; padding:10px 16px; font-size:16px; cursor:pointer; }
   button.on, button.primary { background:var(--acc); border-color:var(--acc); color:#06111f; font-weight:600; }
   table { width:100%; border-collapse:collapse; }
@@ -31,6 +29,12 @@
   .pads span { display:inline-block; margin:0 8px 6px 0; padding:4px 10px; border-radius:20px; background:#22325a; }
   .actions { display:flex; gap:10px; flex-wrap:wrap; }
   #msg { margin-left:auto; align-self:center; color:var(--dim); }
+  .row { display:flex; gap:10px; margin-bottom:10px; }
+  .row select, .row input { flex:1; }
+  input[type=text], #name { background:#0f1a2e; color:var(--fg); border:1px solid var(--line); border-radius:6px; padding:8px; font-size:16px; }
+  .note { margin-top:6px; padding:8px 12px; border-radius:8px; background:rgba(245,183,0,.15); color:var(--hot); }
+  .note:empty { display:none; }
+  h2 small { color:var(--dim); font-weight:normal; font-size:14px; }
   .hint { color:var(--dim); font-size:14px; margin:8px 0 0; }
 </style>
 </head>
@@ -43,14 +47,25 @@
   <div class="card">
     <h2>Connected controllers</h2>
     <div class="pads" id="pads">—</div>
-    <p class="hint">Press a button on a controller: its row lights up in that controller's profile.</p>
+    <div class="note" id="note"></div>
+    <p class="hint">Press a button on a controller: its row lights up below.</p>
   </div>
 
   <div class="card">
-    <div class="tabs">
-      <button id="tab0" class="on" onclick="show(0)">8BitDo adapter</button>
-      <button id="tab1" onclick="show(1)">Wired Xbox</button>
+    <h2>Preset <small id="active"></small></h2>
+    <div class="row">
+      <select id="presets"></select>
+      <button onclick="loadPreset()">Load</button>
+      <button onclick="deletePreset()">Delete</button>
     </div>
+    <div class="row">
+      <input id="name" maxlength="40" placeholder="Preset name">
+      <button onclick="savePreset()">Save as preset</button>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Buttons</h2>
     <table><tbody id="rows"></tbody></table>
   </div>
 
@@ -60,9 +75,8 @@
   </div>
 
   <div class="card actions">
-    <button class="primary" onclick="save()">Save</button>
-    <button onclick="resetProfile()">Defaults for this profile</button>
-    <button onclick="copyProfile()">Copy to the other profile</button>
+    <button class="primary" onclick="apply()">Apply</button>
+    <button onclick="loadDefault()">Reset to default</button>
     <span id="msg"></span>
   </div>
 </main>
@@ -78,95 +92,133 @@ var CHECKS = [["touch_combo","View + Menu together = touchpad"],["swap_sticks","
   ["invert_right_x","Invert right stick X"],["invert_right_y","Invert right stick Y"]];
 var RANGES = [["deadzone_left","Left stick dead zone",0,50,"%"],["deadzone_right","Right stick dead zone",0,50,"%"],
   ["trigger_threshold","LT / RT press point",1,99,"%"]];
-var NAMES = ["adapter","wired"], prof = [{},{}], cur = 0;
+var DEFAULT = "Default", m = {}, changed = false;
 
+function $(id) { return document.getElementById(id); }
+function el(tag, html) { var e = document.createElement(tag); if (html) e.innerHTML = html; return e; }
+function esc(t) { return String(t).replace(/[&<>"]/g, function (c) { return "&#" + c.charCodeAt(0) + ";"; }); }
+function msg(t) { $("msg").textContent = t; }
+function post(url, body) {
+  return fetch(url, { method: "POST", body: body }).then(function (r) {
+    return r.text().then(function (t) { if (!r.ok) throw new Error(t); return t; });
+  });
+}
 function parse(text) {
-  var p = [{},{}], s = -1;
+  var p = {};
   text.split("\n").forEach(function (l) {
-    l = l.replace(/[#;].*/, "").trim();
-    if (!l) return;
-    var m = l.match(/^\[(\w+)\]$/);
-    if (m) { s = NAMES.indexOf(m[1]); return; }
-    var kv = l.split("=");
-    if (s >= 0 && kv.length == 2) p[s][kv[0].trim()] = kv[1].trim();
+    l = l.replace(/#.*/, "").trim();
+    var i = l.indexOf("=");
+    if (i > 0) p[l.slice(0, i).trim()] = l.slice(i + 1).trim();
   });
   return p;
 }
-function format() {
-  var t = "# ghostcontrol-8bitdo mapping: Xbox input = DualSense button\n";
-  for (var i = 0; i < 2; i++) {
-    t += "\n[" + NAMES[i] + "]\n";
-    for (var k in prof[i]) t += k + " = " + prof[i][k] + "\n";
-  }
+function format(p, preset) {
+  var t = "# ghostcontrol-8bitdo mapping\n" + (preset ? "preset = " + preset + "\n" : "");
+  for (var k in p) if (k != "preset") t += k + " = " + p[k] + "\n";
   return t;
 }
-function el(tag, html) { var e = document.createElement(tag); if (html) e.innerHTML = html; return e; }
+function showActive() {
+  $("active").textContent = "· active: " + (m.preset || "custom") + (changed ? " (changed, not applied)" : "");
+}
+function edit() { changed = true; showActive(); msg(""); }
 function render() {
-  var p = prof[cur], rows = document.getElementById("rows"), opts = document.getElementById("opts");
+  var rows = $("rows"), opts = $("opts");
   rows.innerHTML = ""; opts.innerHTML = "";
   IN.forEach(function (it) {
     var tr = el("tr"); tr.id = "row_" + it[0];
     tr.appendChild(el("td", it[1]));
     var sel = el("select");
     OUT.forEach(function (o) { var op = el("option", o[1]); op.value = o[0]; sel.appendChild(op); });
-    sel.value = p[it[0]] || "none";
-    sel.onchange = function () { p[it[0]] = sel.value; dirty(); };
+    sel.value = m[it[0]] || "none";
+    sel.onchange = function () { m[it[0]] = sel.value; edit(); };
     var td = el("td"); td.appendChild(sel); tr.appendChild(td); rows.appendChild(tr);
   });
   CHECKS.forEach(function (c) {
-    var lab = el("label"), cb = el("input"); cb.type = "checkbox"; cb.checked = p[c[0]] == "1";
-    cb.onchange = function () { p[c[0]] = cb.checked ? "1" : "0"; dirty(); };
+    var lab = el("label"), cb = el("input"); cb.type = "checkbox"; cb.checked = m[c[0]] == "1";
+    cb.onchange = function () { m[c[0]] = cb.checked ? "1" : "0"; edit(); };
     lab.appendChild(cb); lab.appendChild(document.createTextNode(c[1])); opts.appendChild(lab);
   });
   RANGES.forEach(function (r) {
     var box = el("div"); box.className = "range";
-    var lab = el("label", "<span>" + r[1] + "</span><b>" + p[r[0]] + r[4] + "</b>");
-    var rg = el("input"); rg.type = "range"; rg.min = r[2]; rg.max = r[3]; rg.value = p[r[0]];
-    rg.oninput = function () { p[r[0]] = rg.value; lab.lastChild.textContent = rg.value + r[4]; dirty(); };
+    var lab = el("label", "<span>" + r[1] + "</span><b>" + m[r[0]] + r[4] + "</b>");
+    var rg = el("input"); rg.type = "range"; rg.min = r[2]; rg.max = r[3]; rg.value = m[r[0]];
+    rg.oninput = function () { m[r[0]] = rg.value; lab.lastChild.textContent = rg.value + r[4]; edit(); };
     box.appendChild(lab); box.appendChild(rg); opts.appendChild(box);
   });
+  showActive();
 }
-function show(i) {
-  cur = i;
-  document.getElementById("tab0").className = i == 0 ? "on" : "";
-  document.getElementById("tab1").className = i == 1 ? "on" : "";
-  render();
-}
-function msg(t) { document.getElementById("msg").textContent = t; }
-function dirty() { msg("Unsaved changes"); }
-function load() {
-  fetch("/mapping").then(function (r) { return r.text(); }).then(function (t) { prof = parse(t); render(); msg(""); });
-}
-function save() {
-  fetch("/mapping", { method: "POST", body: format() })
-    .then(function (r) { return r.text().then(function (t) { msg(r.ok ? "Saved: active now" : "Not saved: " + t); }); })
-    .catch(function () { msg("Console not reachable"); });
-}
-function resetProfile() {
-  fetch("/mapping/default").then(function (r) { return r.text(); }).then(function (t) {
-    prof[cur] = parse(t)[cur]; render(); dirty();
+/* Make text the active mapping on the console. */
+function activate(text, preset) {
+  var p = parse(text);
+  return post("/mapping", format(p, preset)).then(function () {
+    m = p; m.preset = preset; changed = false; render();
   });
 }
-function copyProfile() {
-  prof[1 - cur] = JSON.parse(JSON.stringify(prof[cur]));
-  dirty(); msg("Copied to " + (cur ? "8BitDo adapter" : "Wired Xbox") + " — save to apply");
+function load() {
+  fetch("/mapping").then(function (r) { return r.text(); }).then(function (t) { m = parse(t); changed = false; render(); });
+}
+function listPresets(select) {
+  return fetch("/presets").then(function (r) { return r.text(); }).then(function (t) {
+    var s = $("presets"); s.innerHTML = "";
+    [DEFAULT].concat(t.split("\n").filter(Boolean).sort()).forEach(function (n) {
+      var o = el("option", esc(n)); o.value = n; s.appendChild(o);
+    });
+    if (select) s.value = select;
+  });
+}
+function apply() {
+  post("/mapping", format(m, changed ? "" : m.preset)).then(function () {
+    if (changed) m.preset = ""; changed = false; showActive(); msg("Applied");
+  }).catch(function (e) { msg("Not applied: " + e.message); });
+}
+function loadDefault() {
+  fetch("/mapping/default").then(function (r) { return r.text(); })
+    .then(function (t) { return activate(t, DEFAULT); })
+    .then(function () { msg("Default mapping active"); });
+}
+function loadPreset() {
+  var n = $("presets").value;
+  if (n == DEFAULT) return loadDefault();
+  post("/preset/get", n).then(function (t) { return activate(t, n); })
+    .then(function () { $("name").value = n; msg("Preset “" + n + "” active"); })
+    .catch(function (e) { msg("Not loaded: " + e.message); });
+}
+function savePreset() {
+  var n = $("name").value.trim();
+  if (!n || n == DEFAULT) { msg("Enter a preset name"); return; }
+  post("/preset/save", n + "\n" + format(m, n))
+    .then(function () { return activate(format(m, n), n); })
+    .then(function () { return listPresets(n); })
+    .then(function () { msg("Saved as “" + n + "” and active"); })
+    .catch(function (e) { msg("Not saved: " + (e.message == "bad name" ? "use letters, digits, space, - or _" : e.message)); });
+}
+function deletePreset() {
+  var n = $("presets").value;
+  if (n == DEFAULT) { msg("The default preset is built in"); return; }
+  if (!confirm("Delete preset “" + n + "”?")) return;
+  post("/preset/delete", n).then(function () { return listPresets(); })
+    .then(function () { msg("Deleted “" + n + "”"); })
+    .catch(function (e) { msg("Not deleted: " + e.message); });
 }
 function poll() {
   fetch("/status").then(function (r) { return r.json(); }).then(function (s) {
-    document.getElementById("ver").textContent = s.version + " · button mapper";
-    var pads = document.getElementById("pads"), hot = {};
+    $("ver").textContent = s.version + " · button mapper";
+    var pads = $("pads"), hot = {}, digital = [];
     pads.innerHTML = s.controllers.length ? "" : "No controller connected";
     s.controllers.forEach(function (c) {
-      pads.appendChild(el("span", c.slot + ": " + (c.profile ? "Wired Xbox" : "8BitDo adapter") +
-        (c.pad ? "" : " (press a button)")));
-      if (c.profile == cur) IN.forEach(function (it, i) {
+      pads.appendChild(el("span", c.slot + ": " + (c.analog ? "Xbox (wired)" : "Switch protocol") +
+        (c.pad ? "" : " — press a button")));
+      if (!c.analog) digital.push(c.slot);
+      IN.forEach(function (it, i) {
         if (c.buttons & (1 << i) || (it[0] == "lt" && c.lt > 20) || (it[0] == "rt" && c.rt > 20)) hot[it[0]] = 1;
       });
     });
-    IN.forEach(function (it) { var r = document.getElementById("row_" + it[0]); if (r) r.className = hot[it[0]] ? "hot" : ""; });
+    $("note").textContent = digital.length ? "Controller " + digital.join(", ") +
+      " uses the Switch protocol (8BitDo adapter or Switch Pro): LT / RT are on/off only, without analog travel." : "";
+    IN.forEach(function (it) { var r = $("row_" + it[0]); if (r) r.className = hot[it[0]] ? "hot" : ""; });
   }).catch(function () {}).then(function () { setTimeout(poll, document.hidden ? 2000 : 250); });
 }
-load(); poll();
+load(); listPresets(); poll();
 </script>
 </body>
 </html>

@@ -7,7 +7,7 @@
 #include <string.h>
 #include <unistd.h>
 
-struct gc_profile g_profiles[GC_PROFILE_COUNT];
+struct gc_profile g_profile;
 
 static const char *const in_names[GI_COUNT] = {
     "a", "b", "x", "y", "lb", "rb", "lt", "rt", "ls", "rs",
@@ -24,20 +24,17 @@ static const uint32_t out_bits[GO_COUNT] = {
     SCE_PAD_BUTTON_OPTIONS, SCE_PAD_BUTTON_PS, SCE_PAD_BUTTON_TOUCH_PAD,
     SCE_PAD_BUTTON_UP, SCE_PAD_BUTTON_DOWN, SCE_PAD_BUTTON_LEFT, SCE_PAD_BUTTON_RIGHT
 };
-static const char *const profile_names[GC_PROFILE_COUNT] = { "adapter", "wired" };
 
-void mapper_defaults(struct gc_profile p[GC_PROFILE_COUNT]) {
+void mapper_defaults(struct gc_profile *p) {
     static const uint8_t map[GI_COUNT] = {
         GO_CROSS, GO_CIRCLE, GO_SQUARE, GO_TRIANGLE, GO_L1, GO_R1, GO_L2, GO_R2,
         GO_L3, GO_R3, GO_CREATE, GO_OPTIONS, GO_PS, GO_TOUCHPAD,
         GO_UP, GO_DOWN, GO_LEFT, GO_RIGHT
     };
-    for (int i = 0; i < GC_PROFILE_COUNT; i++) {
-        memset(&p[i], 0, sizeof(p[i]));
-        memcpy(p[i].map, map, sizeof(map));
-        p[i].touch_combo = 1;
-        p[i].trigger_threshold = 6;
-    }
+    memset(p, 0, sizeof(*p));
+    memcpy(p->map, map, sizeof(map));
+    p->touch_combo = 1;
+    p->trigger_threshold = 6;
 }
 
 /* ── View + Menu = touchpad click ─────────────────────────────────────────
@@ -134,22 +131,31 @@ static uint8_t *opt_ptr(struct gc_profile *p, int i, int *lo, int *hi) {
     }
 }
 
-size_t mapper_format(const struct gc_profile p[GC_PROFILE_COUNT], char *buf, size_t size) {
+size_t mapper_format(const struct gc_profile *p, char *buf, size_t size) {
     size_t n = 0;
 #define PUT(...) do { int w = snprintf(buf + n, n < size ? size - n : 0, __VA_ARGS__); \
                       if (w > 0) n += (size_t)w; } while (0)
     PUT("# ghostcontrol-8bitdo mapping: Xbox input = DualSense button\n");
-    for (int k = 0; k < GC_PROFILE_COUNT; k++) {
-        PUT("\n[%s]\n", profile_names[k]);
-        for (int i = 0; i < GI_COUNT; i++)
-            PUT("%s = %s\n", in_names[i], out_names[p[k].map[i] < GO_COUNT ? p[k].map[i] : 0]);
-        for (int i = 0; i < OPT_COUNT; i++) {
-            int lo, hi;
-            PUT("%s = %u\n", opt_names[i], *opt_ptr((struct gc_profile *)&p[k], i, &lo, &hi));
-        }
+    if (p->preset[0]) PUT("preset = %s\n", p->preset);
+    for (int i = 0; i < GI_COUNT; i++)
+        PUT("%s = %s\n", in_names[i], out_names[p->map[i] < GO_COUNT ? p->map[i] : 0]);
+    for (int i = 0; i < OPT_COUNT; i++) {
+        int lo, hi;
+        PUT("%s = %u\n", opt_names[i], *opt_ptr((struct gc_profile *)p, i, &lo, &hi));
     }
 #undef PUT
     return n < size ? n : (size ? size - 1 : 0);
+}
+
+/* Preset names become file names: letters (any script), digits, space, - _ */
+int mapper_valid_name(const char *name) {
+    size_t n = strlen(name);
+    if (!n || n > PRESET_NAME_MAX || name[0] == ' ' || name[n - 1] == ' ') return 0;
+    for (const unsigned char *c = (const unsigned char *)name; *c; c++)
+        if (!(*c >= 0x80 || (*c >= '0' && *c <= '9') || (*c >= 'a' && *c <= 'z') ||
+              (*c >= 'A' && *c <= 'Z') || *c == ' ' || *c == '-' || *c == '_'))
+            return 0;
+    return 1;
 }
 
 static int find(const char *const *names, int count, const char *s) {
@@ -164,72 +170,78 @@ static char *trim(char *s) {
     return s;
 }
 
-int mapper_parse(const char *text, struct gc_profile out[GC_PROFILE_COUNT]) {
-    struct gc_profile p[GC_PROFILE_COUNT];
+int mapper_parse(const char *text, struct gc_profile *out) {
+    struct gc_profile p;
     char line[128];
-    int section = -1, lineno = 0;
-    mapper_defaults(p);
+    int lineno = 0;
+    mapper_defaults(&p);
     while (*text) {
         size_t len = strcspn(text, "\n");
         lineno++;
         if (len >= sizeof(line)) return lineno;
         memcpy(line, text, len); line[len] = '\0';
         text += len + (text[len] == '\n');
-        char *c = strpbrk(line, "#;");
+        char *c = strchr(line, '#');
         if (c) *c = '\0';
         char *s = trim(line);
         if (!*s) continue;
-        if (*s == '[') {
-            char *e = strchr(s, ']');
-            if (!e || e[1]) return lineno;
-            *e = '\0';
-            if ((section = find(profile_names, GC_PROFILE_COUNT, s + 1)) < 0) return lineno;
-            continue;
-        }
         char *eq = strchr(s, '=');
-        if (section < 0 || !eq) return lineno;
+        if (!eq) return lineno;
         *eq = '\0';
         char *key = trim(s), *val = trim(eq + 1);
         int i;
-        if ((i = find(in_names, GI_COUNT, key)) >= 0) {
+        if (strcmp(key, "preset") == 0) {
+            if (*val && !mapper_valid_name(val)) return lineno;
+            snprintf(p.preset, sizeof(p.preset), "%s", val);
+        } else if ((i = find(in_names, GI_COUNT, key)) >= 0) {
             int o = find(out_names, GO_COUNT, val);
             if (o < 0) return lineno;
-            p[section].map[i] = (uint8_t)o;
+            p.map[i] = (uint8_t)o;
         } else if ((i = find(opt_names, OPT_COUNT, key)) >= 0) {
             char *end;
             long v = strtol(val, &end, 10);
             int lo, hi;
-            uint8_t *dst = opt_ptr(&p[section], i, &lo, &hi);
+            uint8_t *dst = opt_ptr(&p, i, &lo, &hi);
             if (!*val || *end || v < lo || v > hi) return lineno;
             *dst = (uint8_t)v;
         } else {
             return lineno;
         }
     }
-    memcpy(out, p, sizeof(p));
+    *out = p;
+    return 0;
+}
+
+int mapper_read_file(const char *path, char *buf, size_t size) {
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return -1;
+    ssize_t n = read(fd, buf, size - 1);
+    close(fd);
+    if (n < 0) return -1;
+    buf[n] = '\0';
+    return (int)n;
+}
+
+int mapper_write_file(const char *path, const char *data, size_t len) {
+    char tmp[160];
+    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
+    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) return -1;
+    int ok = write(fd, data, len) == (ssize_t)len;
+    close(fd);
+    if (!ok || rename(tmp, path) != 0) { unlink(tmp); return -1; }
     return 0;
 }
 
 int mapper_load(const char *path) {
-    char buf[8192];
-    mapper_defaults(g_profiles);
-    int fd = open(path, O_RDONLY);
-    if (fd < 0) return 0;
-    ssize_t n = read(fd, buf, sizeof(buf) - 1);
-    close(fd);
-    if (n < 0) return -1;
-    buf[n] = '\0';
-    return mapper_parse(buf, g_profiles);
+    char buf[4096];
+    mapper_defaults(&g_profile);
+    if (mapper_read_file(path, buf, sizeof(buf)) < 0) return 0;
+    return mapper_parse(buf, &g_profile);
 }
 
 int mapper_save(const char *path) {
-    char buf[8192], tmp[128];
-    size_t n = mapper_format(g_profiles, buf, sizeof(buf));
-    snprintf(tmp, sizeof(tmp), "%s.tmp", path);
-    int fd = open(tmp, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) return -1;
-    int ok = write(fd, buf, n) == (ssize_t)n;
-    close(fd);
-    if (!ok || rename(tmp, path) != 0) { unlink(tmp); return -1; }
-    return 0;
+    char buf[4096];
+    size_t n = mapper_format(&g_profile, buf, sizeof(buf));
+    return mapper_write_file(path, buf, n);
 }

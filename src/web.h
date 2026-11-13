@@ -6,8 +6,9 @@
  * gives it time with web_poll(); a request is answered in one go. */
 #define WEB_PORT 8096
 
-int web_start(int port, const char *mapping_path);   /* 0 ok */
+int web_start(int port, const char *mapping_path, const char *presets_dir);  /* 0 ok */
 void web_poll(int timeout_ms);                       /* wait for and serve one request */
 
-/* Provided by main.c: connected controllers as JSON. */
+/* Provided by main.c: connected controllers as JSON ("analog":0 = triggers
+ * are on/off only, as on the Switch protocol). */
 size_t gc_status_json(char *buf, size_t size);

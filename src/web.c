@@ -7,7 +7,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dirent.h>
 #include <unistd.h>
+#include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <netinet/in.h>
@@ -23,10 +25,11 @@
 INCASSET(web_index_html, "assets/index.html");
 
 static int g_listen = -1;
-static const char *g_mapping_path;
+static const char *g_mapping_path, *g_presets_dir;
 
-int web_start(int port, const char *mapping_path) {
+int web_start(int port, const char *mapping_path, const char *presets_dir) {
     g_mapping_path = mapping_path;
+    g_presets_dir = presets_dir;
     int s = socket(AF_INET, SOCK_STREAM, 0);
     if (s < 0) return -1;
     int one = 1;
@@ -89,30 +92,73 @@ static void serve(int c) {
     if (!post && strncmp(req, "GET ", 4) != 0) { respond(c, 400, "text/plain", "method", 6); return; }
     path[strcspn(path, " ?\r\n")] = '\0';
 
+    char file[192], text[4096];
     if (!post && strcmp(path, "/") == 0) {
         respond(c, 200, "text/html; charset=utf-8", web_index_html, web_index_html_size);
     } else if (!post && strcmp(path, "/status") == 0) {
         size_t len = gc_status_json(out, sizeof(out));
         respond(c, 200, "application/json", out, len);
     } else if (!post && strcmp(path, "/mapping") == 0) {
-        size_t len = mapper_format(g_profiles, out, sizeof(out));
+        size_t len = mapper_format(&g_profile, out, sizeof(out));
         respond(c, 200, "text/plain; charset=utf-8", out, len);
     } else if (!post && strcmp(path, "/mapping/default") == 0) {
-        struct gc_profile def[GC_PROFILE_COUNT];
-        mapper_defaults(def);
-        size_t len = mapper_format(def, out, sizeof(out));
+        struct gc_profile def;
+        mapper_defaults(&def);
+        size_t len = mapper_format(&def, out, sizeof(out));
         respond(c, 200, "text/plain; charset=utf-8", out, len);
     } else if (post && strcmp(path, "/mapping") == 0) {
-        struct gc_profile p[GC_PROFILE_COUNT];
-        int bad = mapper_parse(body, p);
+        struct gc_profile p;
+        int bad = mapper_parse(body, &p);
         if (bad) {
             int len = snprintf(out, sizeof(out), "error on line %d", bad);
             respond(c, 400, "text/plain", out, (size_t)len);
             return;
         }
-        memcpy(g_profiles, p, sizeof(p));
+        g_profile = p;
         if (mapper_save(g_mapping_path) != 0) respond(c, 200, "text/plain", "applied, not saved", 18);
         else respond(c, 200, "text/plain", "saved", 5);
+    } else if (!post && strcmp(path, "/presets") == 0) {
+        /* one name per line */
+        size_t len = 0;
+        DIR *d = opendir(g_presets_dir);
+        struct dirent *e;
+        while (d && (e = readdir(d)) != NULL && len < sizeof(out) - PRESET_NAME_MAX - 2) {
+            size_t n = strlen(e->d_name);
+            if (n <= 4 || strcmp(e->d_name + n - 4, ".ini") != 0) continue;
+            e->d_name[n - 4] = '\0';
+            if (!mapper_valid_name(e->d_name)) continue;
+            len += (size_t)snprintf(out + len, sizeof(out) - len, "%s\n", e->d_name);
+        }
+        if (d) closedir(d);
+        respond(c, 200, "text/plain; charset=utf-8", out, len);
+    } else if (post && (strcmp(path, "/preset/get") == 0 || strcmp(path, "/preset/delete") == 0 ||
+                        strcmp(path, "/preset/save") == 0)) {
+        /* body: preset name, then (save only) a newline and the mapping */
+        char *nl = strchr(body, '\n');
+        if (nl) *nl = '\0';
+        if (!mapper_valid_name(body)) { respond(c, 400, "text/plain", "bad name", 8); return; }
+        snprintf(file, sizeof(file), "%s/%s.ini", g_presets_dir, body);
+        if (path[8] == 'g') {
+            int n = mapper_read_file(file, text, sizeof(text));
+            if (n < 0) respond(c, 404, "text/plain", "no such preset", 14);
+            else respond(c, 200, "text/plain; charset=utf-8", text, (size_t)n);
+        } else if (path[8] == 'd') {
+            if (unlink(file) != 0) respond(c, 404, "text/plain", "no such preset", 14);
+            else respond(c, 200, "text/plain", "deleted", 7);
+        } else {
+            struct gc_profile p;
+            int bad = nl ? mapper_parse(nl + 1, &p) : -1;
+            if (bad) {
+                int len = snprintf(out, sizeof(out), "error on line %d", bad);
+                respond(c, 400, "text/plain", out, (size_t)len);
+                return;
+            }
+            snprintf(p.preset, sizeof(p.preset), "%s", body);
+            size_t len = mapper_format(&p, text, sizeof(text));
+            mkdir(g_presets_dir, 0755);
+            if (mapper_write_file(file, text, len) != 0) respond(c, 400, "text/plain", "cannot write", 12);
+            else respond(c, 200, "text/plain", "saved", 5);
+        }
     } else {
         respond(c, 404, "text/plain", "not found", 9);
     }
