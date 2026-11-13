@@ -87,7 +87,9 @@ static void serve(int c) {
     static char out[8192];
     size_t n = 0, need = 0;
     char *body = NULL;
-    struct timeval tv = { 0, 500000 };
+    /* Served on the controller thread: a slow client must not stall input
+     * for long. Requests from the console's own browser take well under 1 ms. */
+    struct timeval tv = { 0, 40000 };
     setsockopt(c, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
     setsockopt(c, SOL_SOCKET, SO_SNDTIMEO, &tv, sizeof(tv));
     while (n < sizeof(req) - 1) {

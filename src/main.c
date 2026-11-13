@@ -711,8 +711,7 @@ int main(void) {
     if (web_start(WEB_PORT) != 0)
         gc_log("mapping page: port %d busy (errno %d), retrying", WEB_PORT, errno);
     int sc = shortcut_install();
-    if (sc < 0) gc_log("home-screen shortcut failed (0x%08x)", (unsigned)sc);
-    else gc_log(sc ? "home-screen shortcut installed" : "home-screen shortcut registered");
+    if (sc) gc_log(sc > 0 ? "home-screen shortcut installed" : "home-screen shortcut failed (0x%08x)", (unsigned)sc);
     notify(VERSION " started");
 
     for (int i = 0; i < MAX_SLOTS; i++) { g_slots[i].fd = -1; g_slots[i].pad = -1; }

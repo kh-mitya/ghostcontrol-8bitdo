@@ -63,31 +63,31 @@ static int write_file(const char *path, const void *data, size_t size) {
 }
 
 int shortcut_install(void) {
-    int changed = 0;
+    /* Registered once, like ShadowMountPlus and Web File Manager do: files in
+     * place = the tile is there. Removing the tile from the home screen
+     * removes the folder, so the next start brings it back. */
+    if (same(SYS_DIR "/param.json", param_json, sizeof(param_json) - 1) &&
+        same(SYS_DIR "/icon0.png", shortcut_icon_png, shortcut_icon_png_size))
+        return 0;
     if ((mkdir(APP_DIR, 0755) && errno != EEXIST) ||
-        (mkdir(SYS_DIR, 0755) && errno != EEXIST))
+        (mkdir(SYS_DIR, 0755) && errno != EEXIST) ||
+        write_file(SYS_DIR "/icon0.png", shortcut_icon_png, shortcut_icon_png_size) ||
+        write_file(SYS_DIR "/param.json", param_json, sizeof(param_json) - 1))
         return -2;
-    if (!same(SYS_DIR "/param.json", param_json, sizeof(param_json) - 1)) {
-        if (write_file(SYS_DIR "/param.json", param_json, sizeof(param_json) - 1)) return -2;
-        changed = 1;
-    }
-    if (!same(SYS_DIR "/icon0.png", shortcut_icon_png, shortcut_icon_png_size)) {
-        if (write_file(SYS_DIR "/icon0.png", shortcut_icon_png, shortcut_icon_png_size)) return -2;
-        changed = 1;
-    }
-    /* Register every start: the files alone do not show whether the title is
-     * known to the system, and registering again is harmless. */
     int err = sceAppInstUtilInitialize();
-    if (err) return err;
-    /* AppInstallTitleDir is exported only by NID (linking it by name makes the
-     * loader refuse the whole payload) and is missing on some firmware; then
-     * AppInstallAll registers every title dir, as OmniPad-CE does. */
-    int (*install_title_dir)(const char *, const char *, void *) = NULL;
-    uint32_t handle;
-    if (kernel_dynlib_handle(-1, "libSceAppInstUtil.sprx", &handle) == 0)
-        install_title_dir = (void *)kernel_dynlib_resolve(-1, handle, "Wudg3Xe3heE");
-    err = install_title_dir ? install_title_dir(SHORTCUT_TITLE_ID, "/user/app/", NULL)
-                            : sceAppInstUtilAppInstallAll(NULL);
-    sceAppInstUtilTerminate();
-    return err ? err : changed;
+    if (!err) {
+        /* AppInstallTitleDir is exported only by NID (linking it by name makes
+         * the loader refuse the whole payload) and is missing on FW 12; then
+         * AppInstallAll registers the title dirs, as OmniPad-CE and Web File
+         * Manager do. */
+        int (*install_title_dir)(const char *, const char *, void *) = NULL;
+        uint32_t handle;
+        if (kernel_dynlib_handle(-1, "libSceAppInstUtil.sprx", &handle) == 0)
+            install_title_dir = (void *)kernel_dynlib_resolve(-1, handle, "Wudg3Xe3heE");
+        err = install_title_dir ? install_title_dir(SHORTCUT_TITLE_ID, "/user/app/", NULL)
+                                : sceAppInstUtilAppInstallAll(NULL);
+        sceAppInstUtilTerminate();
+    }
+    if (err) unlink(SYS_DIR "/param.json");   /* not registered: try again next start */
+    return err ? err : 1;
 }
