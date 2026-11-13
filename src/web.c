@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dirent.h>
+#include <strings.h>
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/socket.h>
@@ -25,10 +25,9 @@
 INCASSET(web_index_html, "assets/index.html");
 
 static int g_listen = -1;
-static const char *g_mapping_path, *g_presets_dir;
+static const char *g_presets_dir;
 
-int web_start(int port, const char *mapping_path, const char *presets_dir) {
-    g_mapping_path = mapping_path;
+int web_start(int port, const char *presets_dir) {
     g_presets_dir = presets_dir;
     int s = socket(AF_INET, SOCK_STREAM, 0);
     if (s < 0) return -1;
@@ -58,7 +57,7 @@ static void respond(int c, int code, const char *type, const char *body, size_t 
     int n = snprintf(head, sizeof(head),
                      "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\n"
                      "Cache-Control: no-store\r\nConnection: close\r\n\r\n",
-                     code, code == 200 ? "OK" : code == 404 ? "Not Found" : "Bad Request",
+                     code, code == 200 ? "OK" : code == 404 ? "Not Found" : code == 409 ? "Conflict" : "Bad Request",
                      type, len);
     send_all(c, head, (size_t)n);
     send_all(c, body, len);
@@ -90,7 +89,19 @@ static void serve(int c) {
     int post = strncmp(req, "POST ", 5) == 0;
     char *path = req + (post ? 5 : 4);
     if (!post && strncmp(req, "GET ", 4) != 0) { respond(c, 400, "text/plain", "method", 6); return; }
-    path[strcspn(path, " ?\r\n")] = '\0';
+    path[strcspn(path, " \r\n")] = '\0';
+    /* ?slot=N&id=X (ids are [A-Za-z0-9-] only) */
+    char *query = strchr(path, '?'), id[64] = "";
+    int slot = 0;
+    if (query) {
+        *query++ = '\0';
+        char *v = strstr(query, "slot=");
+        if (v) slot = atoi(v + 5);
+        if ((v = strstr(query, "id=")) != NULL) {
+            size_t n = strspn(v + 3, "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-");
+            if (n < sizeof(id)) { memcpy(id, v + 3, n); id[n] = '\0'; }
+        }
+    }
 
     char file[192], text[4096];
     if (!post && strcmp(path, "/") == 0) {
@@ -99,11 +110,13 @@ static void serve(int c) {
         size_t len = gc_status_json(out, sizeof(out));
         respond(c, 200, "application/json", out, len);
     } else if (!post && strcmp(path, "/mapping") == 0) {
-        size_t len = mapper_format(&g_profile, out, sizeof(out));
+        struct gc_profile p;
+        if (gc_mapping_get(slot, id, &p) != 0) { respond(c, 409, "text/plain", "controller changed", 18); return; }
+        size_t len = mapper_format(&p, out, sizeof(out));
         respond(c, 200, "text/plain; charset=utf-8", out, len);
     } else if (!post && strcmp(path, "/mapping/default") == 0) {
         struct gc_profile def;
-        mapper_defaults(&def);
+        mapper_load_preset(g_presets_dir, PRESET_DEFAULT, &def);
         size_t len = mapper_format(&def, out, sizeof(out));
         respond(c, 200, "text/plain; charset=utf-8", out, len);
     } else if (post && strcmp(path, "/mapping") == 0) {
@@ -114,29 +127,24 @@ static void serve(int c) {
             respond(c, 400, "text/plain", out, (size_t)len);
             return;
         }
-        g_profile = p;
-        if (mapper_save(g_mapping_path) != 0) respond(c, 200, "text/plain", "applied, not saved", 18);
-        else respond(c, 200, "text/plain", "saved", 5);
+        if (gc_mapping_set(slot, id, &p) != 0) respond(c, 409, "text/plain", "controller changed", 18);
+        else respond(c, 200, "text/plain", "applied", 7);
     } else if (!post && strcmp(path, "/presets") == 0) {
-        /* one name per line */
+        static char names[PRESETS_MAX][PRESET_NAME_MAX + 1];   /* one name per line */
+        int count = mapper_preset_names(g_presets_dir, names, PRESETS_MAX);
         size_t len = 0;
-        DIR *d = opendir(g_presets_dir);
-        struct dirent *e;
-        while (d && (e = readdir(d)) != NULL && len < sizeof(out) - PRESET_NAME_MAX - 2) {
-            size_t n = strlen(e->d_name);
-            if (n <= 4 || strcmp(e->d_name + n - 4, ".ini") != 0) continue;
-            e->d_name[n - 4] = '\0';
-            if (!mapper_valid_name(e->d_name)) continue;
-            len += (size_t)snprintf(out + len, sizeof(out) - len, "%s\n", e->d_name);
-        }
-        if (d) closedir(d);
+        for (int i = 0; i < count; i++)
+            len += (size_t)snprintf(out + len, sizeof(out) - len, "%s\n", names[i]);
         respond(c, 200, "text/plain; charset=utf-8", out, len);
     } else if (post && (strcmp(path, "/preset/get") == 0 || strcmp(path, "/preset/delete") == 0 ||
                         strcmp(path, "/preset/save") == 0)) {
         /* body: preset name, then (save only) a newline and the mapping */
         char *nl = strchr(body, '\n');
         if (nl) *nl = '\0';
-        if (!mapper_valid_name(body)) { respond(c, 400, "text/plain", "bad name", 8); return; }
+        if (!mapper_valid_name(body) || strcasecmp(body, PRESET_DEFAULT) == 0) {
+            respond(c, 400, "text/plain", "bad name", 8);
+            return;
+        }
         snprintf(file, sizeof(file), "%s/%s.ini", g_presets_dir, body);
         if (path[8] == 'g') {
             int n = mapper_read_file(file, text, sizeof(text));

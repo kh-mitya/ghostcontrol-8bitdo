@@ -48,8 +48,8 @@
 #define LOG_PATH  DATA_DIR "/ghostcontrol-8bitdo.log"
 #define LOCK_PATH DATA_DIR "/gc_main.pid"   /* same lock as GhostControl 1.x */
 #define STOP_PATH DATA_DIR "/stop"
-#define MAPPING_PATH DATA_DIR "/mapping.ini"
 #define PRESETS_DIR  DATA_DIR "/presets"
+#define MAPS_DIR     DATA_DIR "/controllers"   /* mapping of each controller seen */
 
 extern int32_t sceUserServiceInitialize(void *params);
 extern int32_t sceUserServiceGetInitialUser(int32_t *user);
@@ -121,6 +121,9 @@ struct slot {
     int32_t user;                    /* bound user, -1 = the console asks */
     long last_rx, last_inject, retry_at;
     struct gc_combo combo;
+    char ident[48];                  /* stable controller id, file name of its mapping */
+    struct gc_profile map;           /* this controller's mapping */
+    struct gc_guide guide;           /* Xbox + LB/RB preset switch */
 };
 static struct slot g_slots[MAX_SLOTS];
 
@@ -238,9 +241,81 @@ static void pad_delete(struct slot *s) {
     s->pad = -1;
 }
 
+/* ── Per-controller mapping ───────────────────────────────────────────────
+ * A controller is recognised again by its USB serial number when it has a
+ * real one (Microsoft pads do), otherwise by model and physical port. The
+ * 8BitDo adapter is one device to the console, so the mapping follows the
+ * adapter, whichever pad is paired with it. */
+static void make_ident(int fd, const struct gc_usb_identity *id, char *out, size_t size) {
+    struct usb_device_info info;
+    char serial[33] = "";
+    memset(&info, 0, sizeof(info));
+    if (ioctl(fd, USB_GET_DEVICEINFO, &info) == 0) {
+        size_t n = 0;
+        int seen[128] = {0}, distinct = 0;
+        for (const char *c = info.udi_serial; *c && n < sizeof(serial) - 1; c++) {
+            if ((*c >= '0' && *c <= '9') || (*c >= 'A' && *c <= 'Z') || (*c >= 'a' && *c <= 'z')) {
+                if (!seen[(int)*c]++) distinct++;
+                serial[n++] = *c;
+            }
+        }
+        serial[n] = '\0';
+        if (n < 6 || distinct < 3) serial[0] = '\0';   /* "000000000001" is not unique */
+    }
+    if (serial[0]) {
+        snprintf(out, size, "%04x-%04x-%s", id->vid, id->pid, serial);
+        return;
+    }
+    struct usb_device_port_path pp;
+    memset(&pp, 0, sizeof(pp));
+    size_t n = (size_t)snprintf(out, size, "%04x-%04x-port", id->vid, id->pid);
+    if (ioctl(fd, USB_GET_DEV_PORT_PATH, &pp) == 0) {
+        n += (size_t)snprintf(out + n, size - n, "%u", pp.udp_bus);
+        for (unsigned i = 0; i < pp.udp_port_level && i < USB_DEVICE_PORT_PATH_MAX && n < size; i++)
+            n += (size_t)snprintf(out + n, size - n, "-%u", pp.udp_port_no[i]);
+    }
+}
+
+static void map_path(const struct slot *s, char *out, size_t size) {
+    snprintf(out, size, MAPS_DIR "/%s.ini", s->ident);
+}
+
+static void load_map(struct slot *s) {
+    char path[128];
+    map_path(s, path, sizeof(path));
+    if (mapper_load_file(path, &s->map) != 0)
+        mapper_load_preset(PRESETS_DIR, PRESET_DEFAULT, &s->map);
+}
+
+static void store_map(struct slot *s) {
+    char path[128];
+    map_path(s, path, sizeof(path));
+    mkdir(MAPS_DIR, 0755);
+    if (mapper_save_file(path, &s->map) != 0) gc_log("%s: cannot save its mapping", s->path);
+}
+
+static void cycle_preset(struct slot *s, int dir) {
+    static char names[PRESETS_MAX + 1][PRESET_NAME_MAX + 1];
+    int n = 1 + mapper_preset_names(PRESETS_DIR, names + 1, PRESETS_MAX);
+    snprintf(names[0], sizeof(names[0]), "%s", PRESET_DEFAULT);
+    int cur = 0;
+    for (int i = 0; i < n; i++) if (strcmp(names[i], s->map.preset) == 0) cur = i;
+    int next = (cur + dir + n) % n;
+    struct gc_profile p;
+    char msg[128];
+    if (mapper_load_preset(PRESETS_DIR, names[next], &p) != 0) return;
+    s->map = p;
+    store_map(s);
+    snprintf(msg, sizeof(msg), "Controller %d: preset %s", (int)(s - g_slots) + 1, p.preset);
+    notify(msg);
+}
+
 static void inject(struct slot *s, long now) {
     ScePadData p;
-    mapper_apply(&g_profile, &s->in, &s->combo, now, &p);
+    struct gc_input in = s->in;
+    int dir = mapper_preset_combo(&s->guide, &in.buttons, now);
+    if (dir) cycle_preset(s, dir);
+    mapper_apply(&s->map, &in, &s->combo, now, &p);
     scePadVirtualDeviceInsertData(s->pad, &p);
     s->last_inject = now;
 }
@@ -325,6 +400,8 @@ static int slot_open(struct slot *s, const char *path) {
     }
     s->fd = fd; s->id = id; s->used = 1;
     s->in.lx = s->in.ly = s->in.rx = s->in.ry = 128;   /* centred until the first report */
+    make_ident(fd, &id, s->ident, sizeof(s->ident));
+    load_map(s);
     snprintf(s->path, sizeof(s->path), "%s", path);
     if (maxpkt == 0 || maxpkt > 64 || (id.kind == GC_KIND_SWITCH && maxpkt != 64)) {
         slot_close(s, "unexpected packet size");
@@ -349,7 +426,8 @@ static int slot_open(struct slot *s, const char *path) {
     s->eps[0].timeout = id.kind == GC_KIND_SWITCH ? 200 : 0;   /* GIP may stay silent */
     s->eps[0].flags = USB_FS_FLAG_SINGLE_SHORT_OK | USB_FS_FLAG_MULTI_SHORT_OK;
     s->last_rx = now_ms();
-    gc_log("%s: %s %04x:%04x open", path, kind_name(id.kind), id.vid, id.pid);
+    gc_log("%s: %s %04x:%04x open, id %s, preset %s", path, kind_name(id.kind), id.vid, id.pid,
+           s->ident, s->map.preset[0] ? s->map.preset : "custom");
     char msg[96];
     snprintf(msg, sizeof(msg), VERSION ": controller %d (%s) found, press any button",
              (int)(s - g_slots) + 1, kind_name(id.kind));
@@ -465,10 +543,11 @@ size_t gc_status_json(char *buf, size_t size) {
         const struct slot *s = &g_slots[i];
         if (!s->used) continue;
         w = snprintf(buf + n, size - n,
-                     "%s{\"slot\":%d,\"analog\":%d,\"vid\":\"%04x\",\"pid\":\"%04x\","
-                     "\"pad\":%d,\"buttons\":%u,\"lt\":%u,\"rt\":%u}",
-                     first ? "" : ",", i + 1, s->id.kind == GC_KIND_GIP, s->id.vid, s->id.pid,
-                     s->pad >= 0, (unsigned)s->in.buttons, s->in.lt, s->in.rt);
+                     "%s{\"slot\":%d,\"id\":\"%s\",\"preset\":\"%s\",\"analog\":%d,"
+                     "\"vid\":\"%04x\",\"pid\":\"%04x\",\"pad\":%d,\"buttons\":%u,"
+                     "\"lt\":%u,\"rt\":%u}",
+                     first ? "" : ",", i + 1, s->ident, s->map.preset, s->id.kind == GC_KIND_GIP,
+                     s->id.vid, s->id.pid, s->pad >= 0, (unsigned)s->in.buttons, s->in.lt, s->in.rt);
         if (w > 0) n += (size_t)w;
         first = 0;
     }
@@ -477,6 +556,27 @@ size_t gc_status_json(char *buf, size_t size) {
         if (w > 0) n += (size_t)w;
     }
     return n < size ? n : size - 1;
+}
+
+static struct slot *slot_by(int slot, const char *id) {
+    if (slot < 1 || slot > MAX_SLOTS) return NULL;
+    struct slot *s = &g_slots[slot - 1];
+    return s->used && strcmp(s->ident, id) == 0 ? s : NULL;
+}
+
+int gc_mapping_get(int slot, const char *id, struct gc_profile *out) {
+    struct slot *s = slot_by(slot, id);
+    if (!s) return -1;
+    *out = s->map;
+    return 0;
+}
+
+int gc_mapping_set(int slot, const char *id, const struct gc_profile *p) {
+    struct slot *s = slot_by(slot, id);
+    if (!s) return -1;
+    s->map = *p;
+    store_map(s);
+    return 0;
 }
 
 int main(void) {
@@ -514,9 +614,7 @@ int main(void) {
     sceUserServiceInitialize(NULL);
     int r1 = scePadInit(), r2 = scePadSetProcessPrivilege(1);
     if (r1 || r2) gc_log("scePadInit 0x%08x, privilege 0x%08x", (unsigned)r1, (unsigned)r2);
-    int bad = mapper_load(MAPPING_PATH);
-    if (bad) gc_log("%s: error on line %d, using the default mapping", MAPPING_PATH, bad);
-    if (web_start(WEB_PORT, MAPPING_PATH, PRESETS_DIR) != 0)
+    if (web_start(WEB_PORT, PRESETS_DIR) != 0)
         gc_log("mapping page unavailable: port %d (errno %d)", WEB_PORT, errno);
     int sc = shortcut_install();
     if (sc) gc_log(sc > 0 ? "home-screen shortcut installed" : "home-screen shortcut failed (%d)", sc);
