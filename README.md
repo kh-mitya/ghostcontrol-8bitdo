@@ -12,6 +12,9 @@ It was built mainly for one setup, an **Xbox Elite Series 2 on the 8BitDo USB Ad
 small, quiet and safe next to the other payloads you run. The console sees a virtual DualSense for each controller:
 it works in menus, games and the user picker like a real one.
 
+> **Homebrew.** This is an unofficial, community-made homebrew project. It is **not affiliated with, endorsed by or
+> connected to** Sony Interactive Entertainment, Microsoft / Xbox, Nintendo or 8BitDo in any way. See the [disclaimer](#disclaimer).
+
 ---
 
 ## Contents
@@ -26,6 +29,7 @@ it works in menus, games and the user picker like a real one.
 - [Known limitations](#known-limitations)
 - [Building](#building)
 - [Credits and license](#credits-and-license)
+- [Disclaimer](#disclaimer)
 
 ## Features
 
@@ -215,4 +219,10 @@ make send PS5_HOST=<ip>     # optional: send to an ELF loader on port 9021
 
 Licensed under **GPL-3.0-or-later**, like the original GhostControl. See [LICENSE](LICENSE).
 
-> This project is not affiliated with Sony, Microsoft, Nintendo or 8BitDo. Use it at your own risk.
+## Disclaimer
+
+- This is **homebrew software** for jailbroken consoles, made by enthusiasts.
+- It is **not affiliated with, authorized, endorsed or supported by** Sony Interactive Entertainment, Microsoft Corporation / Xbox, Nintendo or 8BitDo (Shenzhen 8BitDo Tech Co., Ltd.), nor by any of their partners.
+- PlayStation, PS5 and DualSense are trademarks of Sony Interactive Entertainment Inc. Xbox and Xbox Elite are trademarks of Microsoft Corporation. Nintendo Switch is a trademark of Nintendo. 8BitDo is a trademark of 8BitDo. All other trademarks belong to their respective owners and are used here only to describe compatibility.
+- No proprietary code, firmware or keys from these companies are included.
+- The software is provided **"as is", without warranty of any kind** (see [LICENSE](LICENSE)). Running homebrew on a console is at your own risk.
