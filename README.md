@@ -5,12 +5,13 @@
 [![License: GPL v3](https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg)](LICENSE)
 ![Platform](https://img.shields.io/badge/platform-PS5%20payload-003791)
 ![Tested](https://img.shields.io/badge/tested-PS5%20Slim%20FW%2012.60-success)
-![Version](https://img.shields.io/badge/version-0.3-informational)
+![Version](https://img.shields.io/badge/version-0.4-informational)
 
 A lightweight rework of [GhostControl](https://github.com/StonedModder/Ghostcontrol-PS5-USB-Controller-Patcher) by StonedModder.
 It was built mainly for one setup, an **Xbox Elite Series 2 on the 8BitDo USB Adapter 2**, and is meant to be
 small, quiet and safe next to the other payloads you run. The console sees a virtual DualSense for each controller:
-it works in menus, games and the user picker like a real one.
+it works in menus, games and the user picker like a real one. Buttons can be remapped on a page in the console's
+own browser, with profiles you switch from the controller.
 
 > **Homebrew.** This is an unofficial, community-made homebrew project. It is **not affiliated with, endorsed by or
 > connected to** Sony Interactive Entertainment, Microsoft / Xbox, Nintendo or 8BitDo in any way. See the [disclaimer](#disclaimer).
@@ -22,6 +23,7 @@ it works in menus, games and the user picker like a real one.
 - [Features](#features)
 - [Supported controllers](#supported-controllers)
 - [Button mapping](#button-mapping)
+- [Mapper and profiles](#mapper-and-profiles)
 - [Installation](#installation)
 - [Usage](#usage)
 - [What changed compared to GhostControl](#what-changed-compared-to-ghostcontrol)
@@ -40,7 +42,9 @@ it works in menus, games and the user picker like a real one.
   - the first controller goes straight to the user at the screen;
   - every further one gets the console's own *"Who is using this controller?"* dialog.
 - **Hot-plug**: plug, unplug or swap controllers at any time; rest mode is handled too. Each controller's pad is removed cleanly when it goes away.
-- **No companion app, no system patches**: a single ELF of ~150 KB.
+- **Button mapper** in the console's browser, opened from a **Media** tile: remap every button, sticks and triggers, light or dark page.
+- **Shared profiles** with symbol names (Bolt, Leaf, Drop, …); each controller remembers its own, and **Xbox + RB / LB** switches them in game.
+- **No companion app, no system patches**: a single ELF of ~220 KB, the page included.
 - **Light on the system**:
   - one thread;
   - a look at the USB ports every 2 s, only while a slot is free;
@@ -70,6 +74,8 @@ it works in menus, games and the user picker like a real one.
 
 ## Button mapping
 
+The default layout (profile **Default**). Everything except the shortcuts below can be changed in the [mapper](#mapper-and-profiles).
+
 | Xbox | PlayStation |
 |---|---|
 | A / B / X / Y | Cross / Circle / Square / Triangle |
@@ -84,7 +90,39 @@ it works in menus, games and the user picker like a real one.
 
 Stick Y is converted to PlayStation orientation for both protocols, so you don't need an inverted-axis profile in 8BitDo Ultimate Software.
 
-You can remap buttons with the adapter's own profile in **8BitDo Ultimate Software**. The payload passes on whatever the adapter sends, so the table above shows the default layout. Edit the profile for **Switch mode** (each mode has its own), and do not turn on stick Y inversion in it: the payload already converts the axis, so it would end up upside down.
+You can also remap with the adapter's own profile in **8BitDo Ultimate Software**; the payload's mapper then works on top of what the adapter sends. Edit the profile for **Switch mode** (each mode has its own), and do not turn on stick Y inversion in it: the payload already converts the axis, so it would end up upside down.
+
+## Mapper and profiles
+
+<p align="center">
+  <img src="docs/page-light.png" width="49%" alt="Mapper page, light theme">
+  <img src="docs/page-dark.png" width="49%" alt="Mapper page, dark theme">
+</p>
+
+**Open it** from the **Media** tab: the payload adds a *GhostControl 8BitDo* tile on its first start (and again only if the tile is removed or its icon changes).
+From a phone or a computer on the same network: `http://<ps5-ip>:8096/`.
+
+- **Left:** connected controllers, label style, profiles, theme.
+- **Rows:** every PlayStation button with its own glyph (the D-pad is four rows). Next to it, the buttons of your controller that press it; several are allowed, e.g. Cross ← A + RS. Click a row to change it: the picker shows what each controller button does now.
+- **Not used:** controller buttons mapped to nothing.
+- **Sticks & triggers:** swap sticks, invert any axis, dead zone per stick, LT / RT press point, View + Menu touchpad on / off.
+- **Help:** every shortcut, the adapter's mode combos included.
+- Rows light up while you press the buttons, so you can find them without looking.
+
+**Profiles**
+
+- Shared by all controllers; each controller remembers the one it uses, and different controllers can use different profiles.
+- **Default** is built in and cannot be changed.
+- **Apply to <profile>** saves your changes into the current profile; **Save as new profile** creates one. Nothing to type: it gets the next free symbol — Bolt, Leaf, Drop, Heart, Moon, Sun, Diamond, Flame, Cloud, Crown, Bell, Clover — and that name is what the console notification shows.
+- Click the current profile again to change its symbol or delete it. Controllers that used a deleted profile go back to Default.
+- **Xbox + RB / Xbox + LB** on the controller: next / previous profile, with a notification *"Controller 1: Bolt"*. No 8BitDo combo uses the Xbox button, so this cannot change the adapter's mode. A lone Xbox press is still the PS button.
+- Buttons are stored **by position** (bottom, right, left, top), not by letter, so a profile works the same on an Xbox pad and on a Switch-layout pad.
+
+**Labels.** Behind the adapter (and for a wired Switch Pro, which reports the same USB id) the payload cannot tell which controller you hold. Pick **Xbox** or **Nintendo** labels for that controller; it only changes the letters on the page.
+
+**Where it is stored** (plain text):
+- `/data/ghostpad/profiles/<Name>.ini` — one file per profile;
+- `/data/ghostpad/controllers/<id>.ini` — the profile and label style of each controller seen. The id is the USB serial when the controller has a real one, otherwise its port (the adapter has none, so it is remembered per USB port).
 
 ## Installation
 
@@ -94,7 +132,7 @@ You need a jailbroken PS5 with a payload loader. Developed and tested on a **PS5
 2. Load it like any other payload:
    - **Payload Manager:** upload the ELF on its web page (port 8084) and start it from the list;
    - **ELF loader** (port 9021): `nc -q0 <ps5-ip> 9021 < ghostcontrol-8bitdo.elf`.
-3. The notification *"ghostcontrol-8bitdo v0.3 started"* appears.
+3. The notification *"ghostcontrol-8bitdo v0.4 started"* appears, and on the first start a *GhostControl 8BitDo* tile appears in **Media**.
 
 The payload keeps running until the console reboots. Add it to your loader's autoload if you want it on every boot.
 
@@ -107,6 +145,8 @@ The payload keeps running until the console reboots. Add it to your loader's aut
 3. *"controller 1 (8BitDo (Switch mode)) found, press any button"* → press a button → *"controller 1 ready"*.
 
 Your 8BitDo profile (toggled with LB + RB + L3 + R3) works as usual; see [Button mapping](#button-mapping) about stick inversion.
+
+> ⚠️ **View + ↑ / ← / → / ↓** (held 3 s) switch the adapter to other modes (XInput, DInput, Mac, PS Classic), where this payload cannot see it. Switch back with **View + LB**.
 
 ### Wired Xbox pad
 
@@ -154,12 +194,16 @@ This project started from GhostControl 1.x (StonedModder). That version was firs
 - Xbox Series X|S Share button.
 - Controller hot-swap on the adapter.
 
+### Added in 0.4
+
+- The mapper page, shared profiles, Xbox + RB / LB profile switch, Media tile (see [Mapper and profiles](#mapper-and-profiles)).
+
 ### Removed (on purpose)
 
 - The XInput (Xbox 360) protocol.
 - Threads, debug hooks into ShellUI, test code and verbose logging.
 
-That takes the code from ~5000 lines to ~1100 and the ELF from 327 KB to 154 KB.
+That took the code from ~5000 lines to ~1100 and the ELF from 327 KB to 154 KB (0.3). The mapper in 0.4 adds ~900 lines of C and the page, for ~220 KB in total.
 
 ## How it works
 
@@ -178,10 +222,12 @@ That takes the code from ~5000 lines to ~1100 and the ELF from 327 KB to 154 KB.
 3. **Read.** One interrupt-IN transfer stays pending per controller, polled without blocking.
    - Each report becomes a `ScePadData` sent with `scePadVirtualDeviceInsertData`.
    - The last state is repeated every 16 ms, because GIP pads only report changes.
-4. **Pad and user.** The virtual pad is created on the first button press, so any dialog it raises has a live controller to answer it.
+4. **Map.** Each report is normalised to Xbox buttons by position, then the controller's profile turns it into DualSense input (dead zones, inversion, triggers, the View + Menu combo, the Xbox + LB / RB profile switch).
+5. **Pad and user.** The virtual pad is created on the first button press, so any dialog it raises has a live controller to answer it.
    - Its id is taken from `/dev/klog`.
    - The first controller is bound to the foreground user with `sceMbusBindDeviceWithUserId`, called inside SceShellUI.
-5. **Release.** On disconnect or stop: cancel the transfer, close the endpoints, give USB back, delete the pad.
+6. **Page.** A small HTTP server on port 8096 is served from the same loop between reports (a slow client can hold it 40 ms at most). The tile in Media is a title with only a `param.json` (deeplink to the page) and an icon, registered with `sceAppInstUtil`.
+7. **Release.** On disconnect or stop: cancel the transfer, close the endpoints, give USB back, delete the pad.
 
 | File | Purpose |
 |---|---|
@@ -190,6 +236,9 @@ That takes the code from ~5000 lines to ~1100 and the ELF from 327 KB to 154 KB.
 | `src/gip_pad.c` | Xbox One / Series USB protocol (GIP), following Linux `xpad` |
 | `src/usb_guard.c` | read-only, fail-closed device identification |
 | `src/shellui_bind.c` | binds a virtual pad to a user |
+| `src/mapper.c` | profiles: mapping, sticks, triggers, combos, text format |
+| `src/web.c`, `assets/index.html` | the mapping page and its HTTP API |
+| `src/shortcut.c`, `assets/icon0.png` | the Media tile |
 | `src/usb_io.h`, `src/gc_types.h` | USB write helper, pad structures |
 
 ## Known limitations
@@ -201,6 +250,7 @@ That takes the code from ~5000 lines to ~1100 and the ELF from 327 KB to 154 KB.
   - the adapter reports every **8 ms** (Switch Pro emulation plus the Bluetooth hop); software cannot speed this up;
   - wired Xbox pads report every **4 ms**, the same as a DualSense over USB.
 - One thread: connecting a new controller briefly (≤ ~1 s) freezes the other controllers' input.
+- The adapter has no usable serial, so its profile is remembered per USB port: plugged into another port, it starts on Default.
 - Wired Xbox support and multiple controllers have not been tested on hardware yet. Reports are welcome.
 
 ## Building

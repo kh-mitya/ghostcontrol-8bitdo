@@ -43,7 +43,7 @@
 #include "web.h"
 #include "shortcut.h"
 
-#define VERSION   "ghostcontrol-8bitdo v0.4-dev"
+#define VERSION   "ghostcontrol-8bitdo v0.4"
 #define DATA_DIR  "/data/ghostpad"
 #define LOG_PATH  DATA_DIR "/ghostcontrol-8bitdo.log"
 #define LOCK_PATH DATA_DIR "/gc_main.pid"   /* same lock as GhostControl 1.x */
